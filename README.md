@@ -30,6 +30,27 @@ race rarely and cleanly. Full reasoning in [`DESIGN.md`](DESIGN.md).
 
 ---
 
+## What answers the brief, and what I added
+
+The minimum solution is the availability check, the atomic booking path, the
+exclusion constraints, the persistent appointment record, and the tests.
+Everything else was added only where it demonstrated one of the assessment
+dimensions, and is marked below as such.
+
+|                                                                                                | Why it is here                                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Availability, booking, technician qualification, bay capability, the appointment record, tests | The three functional requirements                                                                                                                              |
+| GiST exclusion constraints, the atomic claim statement, bounded retry                          | Requirement 2 is a check-then-act race. This is the only layer that can arbitrate it                                                                           |
+| Observability — metrics, tracing, health probes                                                | The brief asks for an observability strategy by name                                                                                                           |
+| Reservation holds, idempotency keys                                                            | Consequences of requirement 2 rather than additions to it: a user-facing booking path under contention gets retried, and a slot chosen is not a slot held      |
+| Outbox and relay, background jobs                                                              | **Elective.** _Build For the Future_ — an appointment that exists alongside a confirmation that was never emitted is the failure a booking flow eventually has |
+| Turborepo, `@scheduler/contracts`, `apps/web`                                                  | **Elective.** The contracts package makes client/server drift a compile error; `apps/web` is the harness for the stubbed layer, not a second implemented one   |
+
+Nothing in the elective rows is load-bearing for the three requirements. They can
+be read last, or skipped.
+
+---
+
 ## Prerequisites
 
 - **Node.js 22+** and **pnpm 10+**
@@ -226,6 +247,16 @@ the table. A sequential test would prove nothing: the naive implementation this
 design exists to avoid passes every sequential test and fails the moment two
 customers click at once.
 
+**What that test does and does not establish.** It is _evidence_ that the
+resource-allocation invariant holds under substantial contention, in one
+execution environment, for the interleavings that happened to occur. It is not a
+proof that the service has no race conditions, and no amount of running it would
+make it one. The proof obligation sits elsewhere: the exclusion constraint is
+_enforcement_, checked by PostgreSQL on every insert, from every replica,
+including paths no test exercises. That division — tests as evidence, the
+constraint as the invariant — is the reason correctness was pushed into the
+database rather than defended in application code.
+
 ## Try it by hand
 
 [`apps/api/docs/curl-walkthrough.md`](apps/api/docs/curl-walkthrough.md) walks the whole
@@ -343,10 +374,17 @@ The first concurrency design used `SELECT … FOR UPDATE` on the technician and
 bay rows, with a database constraint as a backstop. It is textbook, it is what
 most engineers would write, and it would have shipped.
 
-It is also wrong. A row lock locks the **resource**, not the **time slot** — a
-09:00 booking blocks an unrelated 15:00 booking for the same technician. At a
-busy dealership that degenerates into a hot-row queue: correct, and serialised.
-The failure mode is invisible in a demo and severe in production.
+It is also **correct** — and that is the point worth being precise about. The
+lock does prevent double-booking. What it gets wrong is granularity: a row lock
+locks the **resource**, not the **time slot**, so a 09:00 booking blocks an
+unrelated 15:00 booking for the same technician. At a busy dealership that
+degenerates into a hot-row queue. Correct, and serialised. The failure mode is
+invisible in a demo and severe in production.
+
+Correctness was never the problem. Concurrency was. What was wanted is
+synchronisation at `(resource, time-range)`, and that is exactly what an
+exclusion constraint expresses — it conflicts only on an actual overlap, so
+unrelated bookings never interact.
 
 What caught it was asking what the lock physically locks. That reframed the
 exclusion constraint from _backstop_ to _authority_, and pessimistic locking was
@@ -355,9 +393,12 @@ removed entirely rather than supplemented.
 A related correction: `ORDER BY least_loaded` looks obviously right for choosing
 among free technicians. Reasoning about what N simultaneous requests each
 compute shows it makes every request target the same technician, so N−1 collide
-— the fairness heuristic manufactures the contention it appears to relieve.
-`ORDER BY random()` looks wrong and is correct. It is commented as such, because
-a future reader will otherwise "fix" it.
+— the heuristic manufactures the contention it appears to relieve. `ORDER BY
+random()` replaced it, and it is worth being equally precise about what that is:
+not a scheduling or fairness algorithm, but contention-spreading across
+candidates that are already equally valid for the requested window. At larger
+scale the thing to evaluate is power-of-two-choices or a deterministic hash. It
+is commented in the SQL, because a future reader will otherwise "fix" it.
 
 ### The same instinct, applied to structure
 
@@ -422,9 +463,13 @@ pattern-matched "production API" and supplied the usual furniture. Cut to the
 single ownership rule the domain implies, with a documented seam and the
 consequences named.
 
-A second instance: the original plan built a React UI _and_ the backend. The
-brief says implement one layer and stub the other. The UI was dropped and the
-effort moved to the graded artifacts.
+A second instance: the original plan built a React UI _and_ the backend as
+co-equal deliverables. The brief says implement one layer and stub the other, so
+that plan was cut and the effort moved to the graded artifacts. The client that
+exists now was added afterwards and deliberately scoped down — it consumes the
+same contracts package, ships no business logic of its own, and exists to make
+the concurrency guarantee watchable rather than to be a second implementation.
+The distinction is the whole reason it was allowed back in.
 
 ### Where AI was strong and weak
 
