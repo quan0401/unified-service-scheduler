@@ -10,7 +10,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AppointmentStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BookingRepository, APPOINTMENT_DETAIL } from './booking.repository';
-import { isLostRace, isUniqueViolation } from '../../common/postgres-errors';
+import {
+  isContentionTimeout,
+  isLostRace,
+  isUniqueViolation,
+} from '../../common/postgres-errors';
 import {
   HoldExpiredError,
   HoldNotOwnedError,
@@ -155,6 +159,22 @@ export class AppointmentsService {
         if (isUniqueViolation(error) && request.idempotencyKey) {
           const winner = await this.bookings.findByIdempotencyKey(request.idempotencyKey);
           if (winner) return { appointment: winner, replayed: true, attempts };
+        }
+
+        // Waited out the lock or statement budget rather than losing outright.
+        // Retrying would queue behind the same holder for another full budget,
+        // so this reports contention immediately instead. Answering 409 also
+        // keeps an ordinary busy-slot outcome out of the 5xx rate.
+        if (isContentionTimeout(error)) {
+          this.metrics.recordConflict();
+          annotateActiveSpan('booking.contention_timeout', {
+            'booking.attempt_number': attempts,
+          });
+          this.logger.debug(
+            `Booking attempt ${attempts}/${MAX_BOOKING_ATTEMPTS} timed out waiting for ` +
+              `${request.startAt.toISOString()} at dealership ${request.dealershipId}`,
+          );
+          throw new SlotContendedError(attempts);
         }
 
         if (!isLostRace(error)) throw error;
