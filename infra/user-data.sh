@@ -12,6 +12,7 @@ exec > >(tee -a /var/log/scheduler-bootstrap.log) 2>&1
 APP_DIR=/opt/scheduler
 REGION="__AWS_REGION__"
 REGISTRY="__ECR_REGISTRY__"
+PUBLIC_IP="__PUBLIC_IP__"
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -49,8 +50,22 @@ if ! command -v aws >/dev/null 2>&1; then
 fi
 
 # --- Application files --------------------------------------------------------
-mkdir -p "$APP_DIR/data/postgres"
+mkdir -p "$APP_DIR/data/postgres" "$APP_DIR/certs" "$APP_DIR/webroot"
 cd "$APP_DIR"
+
+# nginx will not start without a certificate at these paths, and the real one
+# cannot be issued until nginx is up to answer the http-01 challenge. A
+# self-signed placeholder breaks the cycle; certbot's deploy hook overwrites it
+# minutes later and reloads. Browsers never see it unless issuance fails, which
+# is exactly when a loud warning is what you want.
+if [ ! -f "$APP_DIR/certs/fullchain.pem" ]; then
+  openssl req -x509 -newkey rsa:2048 -nodes -days 7 \
+    -keyout "$APP_DIR/certs/privkey.pem" \
+    -out "$APP_DIR/certs/fullchain.pem" \
+    -subj "/CN=${PUBLIC_IP}" -addext "subjectAltName=IP:${PUBLIC_IP}"
+  chmod 644 "$APP_DIR/certs/fullchain.pem"
+  chmod 600 "$APP_DIR/certs/privkey.pem"
+fi
 
 # The compose file arrives base64-encoded on one line. Multi-line substitution
 # into user-data is fragile; a single opaque token is not.
@@ -110,5 +125,49 @@ done
 if [ ! -f "$APP_DIR/.seeded" ]; then
   docker compose run --rm api pnpm db:seed && touch "$APP_DIR/.seeded"
 fi
+
+# --- TLS ----------------------------------------------------------------------
+#
+# A Let's Encrypt certificate for the Elastic IP itself, so the demo is HTTPS
+# without owning a domain. Two constraints come with that:
+#
+#   * IP address certificates are only issued under the "shortlived" profile
+#     (160 hours). Renewal is not housekeeping here -- miss it for a week and
+#     the site breaks. The snap ships a systemd timer that runs twice daily.
+#   * The nginx and apache certbot plugins do not support IP identifiers. Only
+#     manual, standalone, and webroot do, and standalone would need port 80 that
+#     nginx is already holding. Hence webroot, served out of the shared volume.
+snap install --classic certbot
+ln -sf /snap/bin/certbot /usr/bin/certbot
+
+# Webroot support for IP addresses landed in certbot 5.4. Failing loudly beats
+# issuing nothing and leaving the self-signed placeholder in place silently.
+CERTBOT_VER=$(certbot --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+echo "certbot ${CERTBOT_VER}"
+
+# Copies whatever certbot just issued to the fixed paths nginx reads, then asks
+# nginx to pick them up. Registered as a deploy hook below, so it also runs on
+# every renewal, unattended, for the life of the instance.
+cat > "$APP_DIR/deploy-cert.sh" <<'HOOK'
+#!/bin/bash
+set -euo pipefail
+LIVE=$(find /etc/letsencrypt/live -maxdepth 1 -mindepth 1 -type d | head -1)
+cp -L "$LIVE/fullchain.pem" /opt/scheduler/certs/fullchain.pem
+cp -L "$LIVE/privkey.pem"   /opt/scheduler/certs/privkey.pem
+chmod 644 /opt/scheduler/certs/fullchain.pem
+chmod 600 /opt/scheduler/certs/privkey.pem
+docker exec scheduler-web nginx -s reload
+HOOK
+chmod +x "$APP_DIR/deploy-cert.sh"
+
+# No email: with six-day certs and an automated timer, expiry notices are noise,
+# and this script lives in a public repository.
+certbot certonly \
+  --non-interactive --agree-tos --register-unsafely-without-email \
+  --preferred-profile shortlived \
+  --webroot --webroot-path "$APP_DIR/webroot" \
+  --ip-address "$PUBLIC_IP" \
+  --deploy-hook "$APP_DIR/deploy-cert.sh" \
+  || echo "WARNING: certificate issuance failed; the self-signed placeholder is still in place"
 
 echo "bootstrap complete"

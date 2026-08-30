@@ -29,6 +29,23 @@ else
 fi
 
 log "Role ${GHA_ROLE_NAME}"
+# GitHub issues two subject formats. Repositories created after 2026-07-15 get
+# "immutable" subjects that embed the numeric owner and repository ids --
+# repo:owner@71545774/repo@1351246625:ref:... -- which exist so that renaming an
+# account or repository cannot silently transfer access to whoever claims the
+# old name. Older repositories still send the name-only form, and a repository
+# can be opted in either way at any time.
+#
+# Both are listed. StringEquals against a list is an OR of exact matches, so
+# this accepts either format without weakening anything to a wildcard, and
+# survives GitHub flipping this repository from one to the other.
+#
+# The ids are read from the API rather than pasted, so the policy cannot drift
+# from the repository it is meant to describe.
+OWNER_ID=$(gh api "/repos/${GITHUB_OWNER}/${GITHUB_REPO}" --jq '.owner.id')
+REPO_ID=$(gh api "/repos/${GITHUB_OWNER}/${GITHUB_REPO}" --jq '.id')
+echo "    owner id ${OWNER_ID}, repo id ${REPO_ID}"
+
 # The sub condition is the whole security boundary. Without it any GitHub
 # repository in the world could assume this role. Pinned to one branch of one
 # repo so a pull request from a fork cannot publish an image.
@@ -42,7 +59,10 @@ TRUST=$(cat <<JSON
     "Condition": {
       "StringEquals": {
         "${OIDC_PROVIDER_URL}:aud": "sts.amazonaws.com",
-        "${OIDC_PROVIDER_URL}:sub": "repo:${GITHUB_OWNER}/${GITHUB_REPO}:ref:refs/heads/main"
+        "${OIDC_PROVIDER_URL}:sub": [
+          "repo:${GITHUB_OWNER}@${OWNER_ID}/${GITHUB_REPO}@${REPO_ID}:ref:refs/heads/main",
+          "repo:${GITHUB_OWNER}/${GITHUB_REPO}:ref:refs/heads/main"
+        ]
       }
     }
   }]

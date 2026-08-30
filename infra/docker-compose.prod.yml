@@ -6,8 +6,11 @@
 #     a pnpm install plus two TypeScript builds on that box is a coin flip.
 #     Building on the developer's machine is also an exact architecture match --
 #     Apple silicon and Graviton are both arm64, so no emulation is involved.
-#   * Only nginx publishes a port. The API and the database are reachable on the
-#     compose network and nowhere else, so the security group has one way in.
+#   * Only nginx publishes ports. The API and the database are reachable on the
+#     compose network and nowhere else.
+#   * nginx terminates TLS with a Let's Encrypt IP address certificate. Those
+#     are issued only under the six-day "shortlived" profile, so the host runs
+#     certbot on a timer and its deploy hook reloads this container.
 #   * The database password is generated per deploy rather than being the
 #     literal `scheduler`.
 
@@ -63,4 +66,13 @@ services:
         condition: service_healthy
     ports:
       - '80:80'
+      - '443:443'
+    volumes:
+      # Certificates live on the host, written by certbot's deploy hook to fixed
+      # filenames. Read-only here: nginx consumes them and must never be the
+      # thing that can corrupt them.
+      - ./certs:/etc/nginx/certs:ro
+      # The http-01 challenge webroot. certbot writes the token, nginx serves
+      # it. Both the first issuance and every six-day renewal go through here.
+      - ./webroot:/var/www/certbot:ro
     restart: unless-stopped

@@ -5,12 +5,11 @@
 #   ./infra/teardown.sh            # leaves ECR images and the CI role alone
 #   ALL=1 ./infra/teardown.sh      # also deletes ECR repos, CI role, OIDC provider
 #
-# Two traps this handles that a naive script does not:
-#   * A CloudFront distribution cannot be deleted while enabled. It must be
-#     disabled, and the disable must finish deploying -- several minutes --
-#     before DeleteDistribution is accepted.
-#   * An Elastic IP costs $0.005/hour whether attached or idle. Releasing it is
-#     not optional cleanup; it is the difference between $0 and $3.65 a month.
+# The trap this handles that a naive script does not: an Elastic IP costs
+# $0.005/hour whether attached or idle. Releasing it is not optional cleanup; it
+# is the difference between $0 and $3.65 a month.
+#
+# There is no CloudFront distribution to tear down -- see infra/config.sh.
 
 source "$(dirname "$0")/config.sh"
 
@@ -32,32 +31,6 @@ EIP_ALLOC=$(aws ec2 describe-addresses --filters "Name=tag:Name,Values=${INSTANC
 if [ "$EIP_ALLOC" != "None" ] && [ -n "$EIP_ALLOC" ]; then
   aws ec2 release-address --allocation-id "$EIP_ALLOC"
   echo "    released ${EIP_ALLOC}"
-else
-  echo "    none"
-fi
-
-log "CloudFront distribution"
-DIST_ID=$(aws cloudfront list-distributions \
-  --query "DistributionList.Items[?Comment=='${CF_COMMENT}'].Id | [0]" --output text 2>/dev/null || echo "None")
-if [ "$DIST_ID" != "None" ] && [ -n "$DIST_ID" ]; then
-  ETAG=$(aws cloudfront get-distribution-config --id "$DIST_ID" --query 'ETag' --output text)
-  ENABLED=$(aws cloudfront get-distribution-config --id "$DIST_ID" --query 'DistributionConfig.Enabled' --output text)
-  if [ "$ENABLED" = "True" ]; then
-    aws cloudfront get-distribution-config --id "$DIST_ID" --query 'DistributionConfig' > /tmp/cf-config.json
-    python3 -c "
-import json
-c = json.load(open('/tmp/cf-config.json'))
-c['Enabled'] = False
-json.dump(c, open('/tmp/cf-config.json', 'w'))
-"
-    aws cloudfront update-distribution --id "$DIST_ID" --if-match "$ETAG" \
-      --distribution-config file:///tmp/cf-config.json >/dev/null
-    echo "    disabled; waiting for deployment (several minutes)"
-    aws cloudfront wait distribution-deployed --id "$DIST_ID"
-    ETAG=$(aws cloudfront get-distribution-config --id "$DIST_ID" --query 'ETag' --output text)
-  fi
-  aws cloudfront delete-distribution --id "$DIST_ID" --if-match "$ETAG"
-  echo "    deleted ${DIST_ID}"
 else
   echo "    none"
 fi
