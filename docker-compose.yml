@@ -1,0 +1,23 @@
+# Postgres for local development.
+# Not required if you already run PostgreSQL 16 locally on 5432 --
+# any PG16 instance with the btree_gist extension available will do.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: scheduler-postgres
+    environment:
+      POSTGRES_USER: scheduler
+      POSTGRES_PASSWORD: scheduler
+      POSTGRES_DB: scheduler
+    ports:
+      - '5432:5432'
+    volumes:
+      - scheduler-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U scheduler -d scheduler']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  scheduler-pgdata:
