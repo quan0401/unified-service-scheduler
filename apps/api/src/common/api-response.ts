@@ -1,27 +1,13 @@
 /**
- * Uniform response envelope.
+ * Envelope constructors.
  *
- * Every response -- success or failure -- has the same top-level shape, so a
- * client never has to branch on status code to find out where the payload is.
+ * The envelope *types* are published in @scheduler/contracts, because a client
+ * needs to read this shape. These constructors are not: a client never builds
+ * an envelope, so exporting them would widen the contract for no one's benefit.
  */
+import type { ApiResponse, ApiErrorBody, ResponseMeta } from '@scheduler/contracts';
 
-export interface ResponseMeta {
-  requestId: string;
-  [key: string]: unknown;
-}
-
-export interface ApiErrorBody {
-  code: string;
-  message: string;
-  details?: Record<string, unknown>;
-}
-
-export interface ApiResponse<T> {
-  success: boolean;
-  data: T | null;
-  error: ApiErrorBody | null;
-  meta: ResponseMeta;
-}
+export type { ApiResponse, ApiErrorBody, ResponseMeta };
 
 export function ok<T>(data: T, meta: ResponseMeta): ApiResponse<T> {
   return { success: true, data, error: null, meta };

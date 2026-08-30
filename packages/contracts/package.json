@@ -1,0 +1,20 @@
+{
+  "name": "@scheduler/contracts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Wire format of the Unified Service Scheduler API — requests, responses, and error codes",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

@@ -20,6 +20,7 @@
     "@opentelemetry/sdk-node": "^0.221.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
     "@prisma/client": "^6.19.3",
+    "@scheduler/contracts": "workspace:*",
     "luxon": "^3.7.2",
     "nestjs-pino": "^4.6.1",
     "nestjs-zod": "^5.5.0",

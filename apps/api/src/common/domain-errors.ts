@@ -7,20 +7,13 @@
  * message can leak into a response by accident.
  */
 
-export type DomainErrorCode =
-  | 'DEALERSHIP_NOT_FOUND'
-  | 'SERVICE_TYPE_NOT_FOUND'
-  | 'CUSTOMER_NOT_FOUND'
-  | 'VEHICLE_NOT_FOUND'
-  | 'APPOINTMENT_NOT_FOUND'
-  | 'HOLD_NOT_FOUND'
-  | 'HOLD_EXPIRED'
-  | 'VEHICLE_NOT_OWNED'
-  | 'OUTSIDE_OPENING_HOURS'
-  | 'SLOT_UNAVAILABLE'
-  | 'SLOT_CONTENDED'
-  | 'APPOINTMENT_NOT_CANCELLABLE'
-  | 'VALIDATION_FAILED';
+// The code union is published in @scheduler/contracts: a client branches on
+// these values, so they are part of the wire contract, not an internal detail.
+// The error *classes* stay here -- they are how the server signals failure and
+// have no meaning to a client.
+import type { DomainErrorCode } from '@scheduler/contracts';
+
+export type { DomainErrorCode };
 
 export abstract class DomainError extends Error {
   abstract readonly code: DomainErrorCode;
