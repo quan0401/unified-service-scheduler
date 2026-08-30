@@ -75,7 +75,12 @@ describe('concurrent booking of a single slot', () => {
     // One bay is the bottleneck. Technicians are plentiful so the scarce
     // resource is unambiguous and the assertion cannot pass for the wrong
     // reason.
-    const scenario = await createScenario({ ...UTC_DEALERSHIP, technicianCount: 20, bayCount: 1, vehicleCount: 0 });
+    const scenario = await createScenario({
+      ...UTC_DEALERSHIP,
+      technicianCount: 20,
+      bayCount: 1,
+      vehicleCount: 0,
+    });
     const vehicleIds = await createVehicles(scenario.customerId, CONCURRENT_BOOKERS);
 
     const statuses = await stampede(scenario, vehicleIds);
@@ -128,7 +133,12 @@ describe('concurrent booking of a single slot', () => {
   });
 
   it('is limited by technicians when they are the scarce resource', async () => {
-    const scenario = await createScenario({ ...UTC_DEALERSHIP, technicianCount: 3, bayCount: 20, vehicleCount: 0 });
+    const scenario = await createScenario({
+      ...UTC_DEALERSHIP,
+      technicianCount: 3,
+      bayCount: 20,
+      vehicleCount: 0,
+    });
     const vehicleIds = await createVehicles(scenario.customerId, CONCURRENT_BOOKERS);
 
     const statuses = await stampede(scenario, vehicleIds);
@@ -141,7 +151,12 @@ describe('concurrent booking of a single slot', () => {
   it('never double-books when holds and bookings contend for the same slot', async () => {
     // Mixed traffic: holds and outright bookings compete through different code
     // paths but the same constraints, which is where an inconsistency would hide.
-    const scenario = await createScenario({ ...UTC_DEALERSHIP, technicianCount: 20, bayCount: 1, vehicleCount: 0 });
+    const scenario = await createScenario({
+      ...UTC_DEALERSHIP,
+      technicianCount: 20,
+      bayCount: 1,
+      vehicleCount: 0,
+    });
     const vehicleIds = await createVehicles(scenario.customerId, CONCURRENT_BOOKERS);
     const server = app.getHttpServer();
 

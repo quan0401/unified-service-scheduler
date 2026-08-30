@@ -76,7 +76,9 @@ async function expectExclusionViolation(
   // An explicit flag rather than expect.assertions(): that counter is
   // test-scoped, so it would also count assertions the caller makes afterwards.
   if (!threw) {
-    throw new Error('Expected the insert to be rejected by an exclusion constraint, but it succeeded.');
+    throw new Error(
+      'Expected the insert to be rejected by an exclusion constraint, but it succeeded.',
+    );
   }
 
   expect(isExclusionViolation(caught)).toBe(true);

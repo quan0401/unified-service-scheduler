@@ -10,6 +10,17 @@
  *
  * That separation is deliberate: correctness that depends on a background job
  * running on time is correctness that fails when the job is late.
+ *
+ * This cron runs in every API replica, and deliberately does not coordinate.
+ * Unlike the outbox relay -- where uncoordinated replicas each publish the same
+ * event -- the delete below is a single idempotent statement: PostgreSQL
+ * serialises concurrent deletes on the same rows and the losers simply delete
+ * nothing. Concurrent sweeps waste a query, never correctness. A leader lock
+ * here would add a failure mode (leader dies, sweeping stops) to buy nothing.
+ *
+ * The gauge is likewise per-replica by design: each instance keeps its own
+ * prom-client registry and is scraped separately, so a local reading is the
+ * correct one rather than a conflicting one.
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';

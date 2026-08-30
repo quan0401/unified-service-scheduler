@@ -163,7 +163,7 @@ Turbo caches `build` and `test`. The database-backed tasks are declared
 file inputs, so a cached "pass" could report success for a suite that never ran
 against the current schema.
 
-**85 tests. 93.0% statements, 94.2% lines, 97.0% functions.**
+**91 tests. 93.6% statements, 94.8% lines, 97.1% functions.**
 
 | Suite                               | Tests | What it proves                                                        |
 | ----------------------------------- | ----- | --------------------------------------------------------------------- |
@@ -172,7 +172,8 @@ against the current schema.
 | `exclusion-constraints.e2e-spec.ts` | 12    | The database rejects overlaps — written _before_ any service code     |
 | `booking.e2e-spec.ts`               | 21    | Booking, refusals, holds, ownership, idempotency, cancellation        |
 | `availability.e2e-spec.ts`          | 10    | Occupancy reflects skills, capabilities, shifts, bookings             |
-| `catalog-and-jobs.e2e-spec.ts`      | 14    | Reference data, health, metrics, sweeper, and **outbox atomicity**    |
+| `catalog-and-jobs.e2e-spec.ts`      | 15    | Reference data, health, metrics, sweeper, and **outbox atomicity**    |
+| `outbox-relay.e2e-spec.ts`          | 5     | Concurrent relays dispatch each event exactly once                    |
 | `booking-race.e2e-spec.ts`          | 5     | **The decisive tests**                                                |
 
 The decisive one fires **200 simultaneous bookings at a single slot backed by a
@@ -408,7 +409,7 @@ produced.
 
 Every architectural decision here has a stated reason, and every reason is
 either mechanical (what the lock locks, what the constraint predicate can
-evaluate) or measured (85 tests, 258 ms for 200 concurrent bookings, a verified
+evaluate) or measured (91 tests, 258 ms for 200 concurrent bookings, a verified
 status distribution). Where a decision has a cost — Prisma with PgBouncer
 disabling prepared statements, no authentication, at-least-once event delivery —
 it is named in `DESIGN.md` rather than left for a reader to discover.

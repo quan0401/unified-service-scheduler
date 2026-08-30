@@ -49,12 +49,14 @@ export class DomainExceptionFilter implements ExceptionFilter {
 
     if (exception instanceof DomainError) {
       const status = STATUS_BY_CODE[exception.code] ?? HttpStatus.BAD_REQUEST;
-      response.status(status).json(
-        fail(
-          { code: exception.code, message: exception.message, details: exception.details },
-          meta,
-        ),
-      );
+      response
+        .status(status)
+        .json(
+          fail(
+            { code: exception.code, message: exception.message, details: exception.details },
+            meta,
+          ),
+        );
       return;
     }
 

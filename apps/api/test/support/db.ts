@@ -15,9 +15,6 @@ if (!url) throw new Error('TEST_DATABASE_URL is not set. Copy .env.example to .e
 
 export const testDb = new PrismaClient({ datasources: { db: { url } } });
 
-
-
-
 /** Truncates every domain table, leaving the schema and constraints intact. */
 export async function resetData(): Promise<void> {
   await testDb.$executeRawUnsafe(`

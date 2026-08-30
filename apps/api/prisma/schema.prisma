@@ -217,6 +217,8 @@ model OutboxEvent {
   publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
   attemptCount  Int       @default(0) @map("attempt_count")
 
-  @@index([publishedAt, createdAt])
+  // The relay's claim index is NOT declared here. It is a partial index over
+  // unpublished rows only, which Prisma's schema language cannot express. See:
+  //   prisma/migrations/*_outbox_partial_index/migration.sql
   @@map("outbox_event")
 }

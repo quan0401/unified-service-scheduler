@@ -17,7 +17,7 @@ pnpm start:dev
 Every response uses the same envelope, so `jq` paths are uniform:
 
 ```json
-{ "success": true, "data": { }, "error": null, "meta": { "requestId": "..." } }
+{ "success": true, "data": {}, "error": null, "meta": { "requestId": "..." } }
 ```
 
 ## Capture the ids

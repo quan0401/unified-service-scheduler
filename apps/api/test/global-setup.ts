@@ -22,9 +22,7 @@ export default function globalSetup(): void {
     throw new Error('TEST_DATABASE_URL is not set. Copy .env.example to .env.');
   }
   if (!/scheduler_test/.test(testUrl)) {
-    throw new Error(
-      `TEST_DATABASE_URL must point at a dedicated test database, got: ${testUrl}`,
-    );
+    throw new Error(`TEST_DATABASE_URL must point at a dedicated test database, got: ${testUrl}`);
   }
 
   execSync('pnpm prisma migrate deploy', {
