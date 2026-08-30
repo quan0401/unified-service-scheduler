@@ -23,8 +23,19 @@ process.env.DATABASE_URL = testUrl;
 // Concurrency tests deliberately send hundreds of requests from one address.
 // The guard stays installed -- only its ceiling is raised -- so a broken
 // throttler configuration would still fail at startup.
-process.env.THROTTLE_BURST_LIMIT ??= '100000';
-process.env.THROTTLE_SUSTAINED_LIMIT ??= '100000';
+//
+// Assigned unconditionally, and that is the point. These were `??=` until it
+// turned out they never fired: jest's globalSetup loads .env into process.env
+// before any test file is evaluated, so THROTTLE_BURST_LIMIT was already 20 by
+// the time this ran and the ceiling was never raised. The suite then failed
+// with 429s for anyone who had followed the README and created a .env, while CI
+// stayed green because .env is gitignored there. No in-file capture can tell a
+// real shell override from a .env value once globalSetup has run, so the test
+// harness simply owns these two: an integration run always gets the high
+// ceiling. ThrottlerModule reads them when AppModule is evaluated, which is the
+// require below, so they must be set before it -- not after.
+process.env.THROTTLE_BURST_LIMIT = '100000';
+process.env.THROTTLE_SUSTAINED_LIMIT = '100000';
 
 // Request logging is signal in production and noise in a test run, where a
 // concurrency suite would emit hundreds of lines per assertion.

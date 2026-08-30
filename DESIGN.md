@@ -37,6 +37,14 @@ Secondary requirement, from _Build For the Future_: scalability, performance,
 reliability, maintainability, observability. These shape the design as much as
 the three functional requirements — noted inline where they do.
 
+**What is elective, stated up front.** The minimum solution is the availability
+check, the atomic booking path, the exclusion constraints, the persistent record,
+and the tests. Holds and idempotency follow from requirement 2 rather than adding
+to it; observability is named in the brief. The outbox and its relay, the
+background jobs, Turborepo, `@scheduler/contracts`, and `apps/web` are elective,
+added where they demonstrate an assessment dimension. `README.md` carries the
+table; nothing elective is load-bearing for the three requirements.
+
 ---
 
 ## 2. Architecture
@@ -265,13 +273,18 @@ retry logic, or how many API instances are running.
 ### Layer 2: the atomic claim statement
 
 **Rejected: `SELECT … FOR UPDATE` on the technician and bay rows.** This was the
-first design, and it is wrong in an instructive way. A row lock locks the
-_resource_, not the _time slot_ — booking a technician at 09:00 blocks an
-unrelated 15:00 booking for the same technician. At a busy dealership that
-degenerates into a hot-row queue: correct, and serialised. Exclusion constraints
-conflict only on `(resource, overlapping range)`, the finest granularity
+first design, and it is instructive precisely because it is not incorrect. Row
+locks would prevent double-booking. What they get wrong is _granularity_: a row
+lock locks the **resource**, not the **time slot**, so booking a technician at
+09:00 blocks an unrelated 15:00 booking for the same technician. At a busy
+dealership that degenerates into a hot-row queue — correct, and serialised.
+
+Correctness was never the problem; concurrency was. The synchronisation actually
+wanted is at `(resource, time-range)`, and an exclusion constraint expresses
+exactly that: it conflicts only on a genuine overlap, the finest granularity
 available, so unrelated bookings never interact. The constraints therefore
-_replace_ pessimistic locking rather than backing it up.
+_replace_ pessimistic locking rather than backing it up — not because locking was
+unsound, but because it was coarser than the problem required.
 
 Selection and insertion happen in one statement:
 
@@ -301,10 +314,22 @@ rows when either did not — so "nothing available" costs no extra query. The
 additional index is needed.
 
 **`ORDER BY random()` is deliberate.** `ORDER BY least_loaded` is the obvious
-choice and is actively harmful: every concurrent request computes the same
-least-loaded technician and targets it, so N−1 collide. The fairness heuristic
-manufactures the contention it appears to relieve. Randomising across the free
-pool drops the conflict rate from roughly O(N) toward zero.
+choice and is actively harmful under concurrency: every in-flight request
+computes the same least-loaded technician from the same stale snapshot and
+targets it, so N−1 collide. The heuristic manufactures the contention it appears
+to relieve. Randomising across the free pool drops the conflict rate from roughly
+O(N) toward zero.
+
+Worth being exact about what this is and is not. It is not a scheduling policy
+and not a fairness algorithm — it is contention-spreading across candidates the
+query has _already_ established are equally valid for this window, so there is no
+quality dimension being traded away. Its ceiling is that it ignores load
+entirely: with heterogeneous technicians, or a need for deliberate utilisation
+balancing, the thing to evaluate is power-of-two-choices — sample two, take the
+better — which keeps most of the spreading while reintroducing load-awareness. A
+deterministic hash over the request would also spread, and would additionally
+make assignment reproducible, at the cost of clustering whenever the hash inputs
+cluster.
 
 ### Layer 3: bounded retry and fail-fast
 
@@ -614,11 +639,13 @@ mattered:
 
 **The rejected locking design.** The first proposal was
 `SELECT … FOR UPDATE` on technician and bay rows, with a constraint as backstop.
-It is textbook, it is what most engineers would write, and it would have
-shipped. What caught it was asking a mechanical question rather than a stylistic
-one: _what does this lock actually lock?_ It locks the technician row, so a
-09:00 booking blocks an unrelated 15:00 booking. That reframed the constraint
-from backstop to authority and removed pessimistic locking entirely.
+It is textbook, it is what most engineers would write, and it would have shipped
+— and it would have been correct. What caught it was asking a mechanical question
+rather than a stylistic one: _what does this lock actually lock?_ It locks the
+technician row, so a 09:00 booking blocks an unrelated 15:00 booking. The defect
+is granularity, not correctness, which is the harder kind to notice: nothing
+fails, throughput just quietly collapses under contention. That reframed the
+constraint from backstop to authority and removed pessimistic locking entirely.
 
 **Scope discipline.** An early pass added JWT auth, login, and roles. Re-reading
 the brief showed "Domain: Ownership" names the business domain — vehicle
@@ -680,6 +707,17 @@ bay** and asserts exactly one `201`, 199 `409`, and exactly one row in the
 table. A sequential test would prove nothing here — the naive check-then-act
 implementation this design exists to avoid passes every sequential test ever
 written and fails the moment two customers click at once.
+
+**Evidence is not enforcement, and the distinction is the design.** This test is
+evidence: the invariant held under substantial contention, on one machine, for
+the interleavings that happened to occur. Run it a thousand times and it is still
+evidence — a concurrency test samples a schedule space it cannot enumerate, so it
+can demonstrate a bug and never establish the absence of one. What carries the
+guarantee is the exclusion constraint, which PostgreSQL checks on every insert,
+from every replica, on paths no test reaches. The tests are how the
+implementation is shown to behave; the constraint is why it cannot misbehave.
+Had correctness been left in application code, there would be nothing in this
+section but sampling.
 
 Related cases: capacity 5 against 200 bookers fills every bay exactly once
 (neither overbooking nor conceding early); technician scarcity limits correctly;
