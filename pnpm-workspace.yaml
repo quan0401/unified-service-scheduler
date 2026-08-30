@@ -1,0 +1,14 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# Prisma and its engines run install scripts. pnpm blocks these by default;
+# without the allowance the client is never generated and every query fails at
+# runtime rather than at install time.
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - prisma
+  - esbuild
+  - '@parcel/watcher'
+  - unrs-resolver

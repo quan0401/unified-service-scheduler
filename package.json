@@ -1,0 +1,29 @@
+{
+  "name": "unified-service-scheduler",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Unified Service Scheduler — dealership appointment booking",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "test:load": "turbo run test:load",
+    "test:cov": "turbo run test:cov",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
+    "db:deploy": "pnpm --filter @scheduler/api db:deploy",
+    "db:seed": "pnpm --filter @scheduler/api db:seed",
+    "start:dev": "pnpm --filter @scheduler/api start:dev"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "turbo": "^2.10.12",
+    "typescript": "^5.9.3"
+  }
+}
