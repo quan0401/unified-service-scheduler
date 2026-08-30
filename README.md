@@ -103,6 +103,7 @@ without adding seams.
 
 ```bash
 pnpm install          # at the repository root — it is a workspace
+pnpm build            # generates the Prisma client and compiles contracts
 
 cd apps/api
 cp .env.example .env
@@ -123,6 +124,11 @@ The API listens on `http://localhost:3000`. Swagger UI is at `/docs`.
 > hand-written migration SQL — Prisma's schema language cannot express them.
 > Pushing the schema alone creates tables with no constraints, and every
 > concurrency test would then pass vacuously.
+
+> **`pnpm build` is not optional here.** It runs `prisma generate`, so `db:seed`
+> has a client to import, and it compiles `@scheduler/contracts`, which the API
+> imports for its error-code union — without it the integration suite fails to
+> typecheck rather than failing a test. Verified from a clean clone.
 
 ## Run it with Docker
 
