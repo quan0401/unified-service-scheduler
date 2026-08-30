@@ -1,0 +1,144 @@
+# Unified Service Scheduler -- end-to-end booking flow.
+#
+# For the VS Code REST Client extension. Run the requests top to bottom; each
+# captures the ids the next one needs, so no manual copying is required.
+#
+# Prerequisites:
+#   cd api && pnpm prisma migrate deploy && pnpm db:seed && pnpm start:dev
+
+@host = http://localhost:3000
+@contentType = application/json
+
+### Health -- is the service up?
+GET {{host}}/health
+
+### Readiness -- is the database reachable?
+GET {{host}}/health/ready
+
+### 1. List dealerships. Northgate Auto is the interesting one: only a single
+###    bay in its estate can take a transmission job, so it is where contention
+###    is demonstrable.
+# @name dealerships
+GET {{host}}/dealerships
+
+@dealershipId = {{dealerships.response.body.data.1.id}}
+
+### 2. List service types. Transmission Repair runs 240 minutes, long enough
+###    that one booking removes most of the day.
+# @name serviceTypes
+GET {{host}}/service-types
+
+@serviceTypeId = {{serviceTypes.response.body.data.4.id}}
+
+### 3. Pick a customer and one of their vehicles.
+###    Replace the id below with one printed by `pnpm db:seed`.
+@customerId = REPLACE_WITH_SEEDED_CUSTOMER_ID
+
+# @name vehicles
+GET {{host}}/customers/{{customerId}}/vehicles
+
+@vehicleId = {{vehicles.response.body.data.0.id}}
+
+### 4. Availability for a Monday. Advisory only -- a slot shown free here can be
+###    taken a moment later. Booking re-checks atomically.
+GET {{host}}/availability?dealershipId={{dealershipId}}&serviceTypeId={{serviceTypeId}}&date=2026-09-07
+
+### 5. Hold the 07:30 local slot for two minutes while "filling in the form".
+# @name hold
+POST {{host}}/holds
+Content-Type: {{contentType}}
+
+{
+  "dealershipId": "{{dealershipId}}",
+  "customerId": "{{customerId}}",
+  "vehicleId": "{{vehicleId}}",
+  "serviceTypeId": "{{serviceTypeId}}",
+  "startAt": "2026-09-07T06:30:00Z"
+}
+
+@holdId = {{hold.response.body.data.id}}
+
+### 6. While the hold is live, a competitor is refused. Expect 409.
+POST {{host}}/appointments
+Content-Type: {{contentType}}
+
+{
+  "dealershipId": "{{dealershipId}}",
+  "customerId": "{{customerId}}",
+  "vehicleId": "{{vehicleId}}",
+  "serviceTypeId": "{{serviceTypeId}}",
+  "startAt": "2026-09-07T06:30:00Z"
+}
+
+### 7. Confirm the hold. Promotes the SAME row to CONFIRMED -- note the id is
+###    unchanged, so the slot is never momentarily released.
+# @name appointment
+POST {{host}}/appointments
+Content-Type: {{contentType}}
+Idempotency-Key: walkthrough-key-001
+
+{
+  "dealershipId": "{{dealershipId}}",
+  "customerId": "{{customerId}}",
+  "vehicleId": "{{vehicleId}}",
+  "serviceTypeId": "{{serviceTypeId}}",
+  "startAt": "2026-09-07T06:30:00Z",
+  "holdId": "{{holdId}}"
+}
+
+@appointmentId = {{appointment.response.body.data.id}}
+
+### 8. Replay with the same Idempotency-Key. Same appointment, replayed: true,
+###    and still exactly one row in the database.
+POST {{host}}/appointments
+Content-Type: {{contentType}}
+Idempotency-Key: walkthrough-key-001
+
+{
+  "dealershipId": "{{dealershipId}}",
+  "customerId": "{{customerId}}",
+  "vehicleId": "{{vehicleId}}",
+  "serviceTypeId": "{{serviceTypeId}}",
+  "startAt": "2026-09-07T06:30:00Z",
+  "holdId": "{{holdId}}"
+}
+
+### 9. The confirmation record (Requirement 3): customer, vehicle, technician,
+###    and service bay, all associated.
+GET {{host}}/appointments/{{appointmentId}}
+
+### 10. Booking someone else's vehicle is refused. Expect 403.
+POST {{host}}/appointments
+Content-Type: {{contentType}}
+
+{
+  "dealershipId": "{{dealershipId}}",
+  "customerId": "{{customerId}}",
+  "vehicleId": "00000000-0000-4000-8000-000000000000",
+  "serviceTypeId": "{{serviceTypeId}}",
+  "startAt": "2026-09-08T06:30:00Z"
+}
+
+### 11. Outside opening hours. Expect 422.
+POST {{host}}/appointments
+Content-Type: {{contentType}}
+
+{
+  "dealershipId": "{{dealershipId}}",
+  "customerId": "{{customerId}}",
+  "vehicleId": "{{vehicleId}}",
+  "serviceTypeId": "{{serviceTypeId}}",
+  "startAt": "2026-09-08T03:00:00Z"
+}
+
+### 12. All appointments for the customer.
+GET {{host}}/appointments?customerId={{customerId}}
+
+### 13. Cancel. The record is retained for audit and the slot becomes bookable.
+DELETE {{host}}/appointments/{{appointmentId}}
+
+### 14. Confirm the slot came back.
+GET {{host}}/availability?dealershipId={{dealershipId}}&serviceTypeId={{serviceTypeId}}&date=2026-09-07
+
+### Domain metrics: conflicts, retry exhaustion, attempts per booking.
+GET {{host}}/metrics

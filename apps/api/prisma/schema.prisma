@@ -1,0 +1,220 @@
+// Unified Service Scheduler — data model.
+//
+// The correctness guarantee of this system (no double-booking) is NOT expressed
+// here. It lives in PostgreSQL GiST exclusion constraints, which Prisma's schema
+// language cannot represent. See:
+//   prisma/migrations/*_booking_exclusion_constraints/migration.sql
+// Those constraints are the authority; application code is only an optimization.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AppointmentStatus {
+  HELD
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+model Dealership {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  // IANA identifier, e.g. "America/Los_Angeles". Drives slot generation and
+  // display only -- every stored instant is UTC.
+  timezone  String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  openingHours OpeningHour[]
+  bays         ServiceBay[]
+  technicians  Technician[]
+  appointments Appointment[]
+
+  @@map("dealership")
+}
+
+// One row per weekday the dealership is open. A missing row means closed.
+model OpeningHour {
+  id           String @id @default(uuid()) @db.Uuid
+  dealershipId String @map("dealership_id") @db.Uuid
+  // 1 = Monday .. 7 = Sunday, matching ISO-8601 and Luxon's `weekday`.
+  dayOfWeek    Int    @map("day_of_week")
+  // Minutes from local midnight. 480 = 08:00.
+  openMinute   Int    @map("open_minute")
+  closeMinute  Int    @map("close_minute")
+
+  dealership Dealership @relation(fields: [dealershipId], references: [id], onDelete: Cascade)
+
+  @@unique([dealershipId, dayOfWeek])
+  @@map("opening_hour")
+}
+
+model ServiceType {
+  id              String @id @default(uuid()) @db.Uuid
+  name            String @unique
+  // Drives the computed appointment end time. Stored on the appointment at
+  // booking time so later edits here never move existing bookings.
+  durationMinutes Int    @map("duration_minutes")
+
+  skills       TechnicianSkill[]
+  capabilities BayCapability[]
+  appointments Appointment[]
+
+  @@map("service_type")
+}
+
+model ServiceBay {
+  id           String  @id @default(uuid()) @db.Uuid
+  dealershipId String  @map("dealership_id") @db.Uuid
+  name         String
+  active       Boolean @default(true)
+
+  dealership   Dealership      @relation(fields: [dealershipId], references: [id], onDelete: Cascade)
+  capabilities BayCapability[]
+  appointments Appointment[]
+
+  @@unique([dealershipId, name])
+  @@map("service_bay")
+}
+
+// A bay is equipped for a service type iff this row exists. Modelled as a join
+// table rather than an enum array so eligibility is a plain SQL join.
+model BayCapability {
+  serviceBayId  String @map("service_bay_id") @db.Uuid
+  serviceTypeId String @map("service_type_id") @db.Uuid
+
+  serviceBay  ServiceBay  @relation(fields: [serviceBayId], references: [id], onDelete: Cascade)
+  serviceType ServiceType @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
+
+  @@id([serviceBayId, serviceTypeId])
+  @@map("bay_capability")
+}
+
+model Technician {
+  id           String  @id @default(uuid()) @db.Uuid
+  dealershipId String  @map("dealership_id") @db.Uuid
+  name         String
+  active       Boolean @default(true)
+
+  dealership   Dealership        @relation(fields: [dealershipId], references: [id], onDelete: Cascade)
+  skills       TechnicianSkill[]
+  shifts       TechnicianShift[]
+  appointments Appointment[]
+
+  @@map("technician")
+}
+
+// A technician is qualified for a service type iff this row exists.
+model TechnicianSkill {
+  technicianId  String @map("technician_id") @db.Uuid
+  serviceTypeId String @map("service_type_id") @db.Uuid
+
+  technician  Technician  @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  serviceType ServiceType @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
+
+  @@id([technicianId, serviceTypeId])
+  @@map("technician_skill")
+}
+
+model TechnicianShift {
+  id           String @id @default(uuid()) @db.Uuid
+  technicianId String @map("technician_id") @db.Uuid
+  dayOfWeek    Int    @map("day_of_week")
+  startMinute  Int    @map("start_minute")
+  endMinute    Int    @map("end_minute")
+
+  technician Technician @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+
+  @@unique([technicianId, dayOfWeek])
+  @@map("technician_shift")
+}
+
+model Customer {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  email     String   @unique
+  phone     String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  vehicles     Vehicle[]
+  appointments Appointment[]
+
+  @@map("customer")
+}
+
+model Vehicle {
+  id         String @id @default(uuid()) @db.Uuid
+  customerId String @map("customer_id") @db.Uuid
+  vin        String @unique
+  make       String
+  model      String
+  year       Int
+
+  customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+
+  @@map("vehicle")
+}
+
+model Appointment {
+  id            String @id @default(uuid()) @db.Uuid
+  dealershipId  String @map("dealership_id") @db.Uuid
+  customerId    String @map("customer_id") @db.Uuid
+  vehicleId     String @map("vehicle_id") @db.Uuid
+  serviceTypeId String @map("service_type_id") @db.Uuid
+  technicianId  String @map("technician_id") @db.Uuid
+  serviceBayId  String @map("service_bay_id") @db.Uuid
+
+  // Both instants are stored. `endAt` is derived from the service duration once,
+  // at booking time, so the exclusion constraints can range-check without a
+  // function call and historical bookings stay stable.
+  startAt DateTime @map("start_at") @db.Timestamptz(6)
+  endAt   DateTime @map("end_at") @db.Timestamptz(6)
+
+  status AppointmentStatus @default(CONFIRMED)
+
+  // Set only while status = HELD. A hold blocks competitors until it lapses;
+  // reads treat a lapsed hold as free, so correctness never waits on the sweeper.
+  holdExpiresAt DateTime? @map("hold_expires_at") @db.Timestamptz(6)
+
+  // Guards against duplicate bookings from client and load-balancer retries.
+  idempotencyKey String? @unique @map("idempotency_key")
+
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  cancelledAt DateTime? @map("cancelled_at") @db.Timestamptz(6)
+
+  dealership  Dealership  @relation(fields: [dealershipId], references: [id])
+  customer    Customer    @relation(fields: [customerId], references: [id])
+  vehicle     Vehicle     @relation(fields: [vehicleId], references: [id])
+  serviceType ServiceType @relation(fields: [serviceTypeId], references: [id])
+  technician  Technician  @relation(fields: [technicianId], references: [id])
+  serviceBay  ServiceBay  @relation(fields: [serviceBayId], references: [id])
+
+  // Listing indexes. The overlap probes ride the GiST indexes created by the
+  // exclusion constraints, so they need no btree index here.
+  @@index([dealershipId, startAt])
+  @@index([customerId, startAt])
+  @@map("appointment")
+}
+
+// Transactional outbox. Rows are written in the same transaction as the
+// appointment, so a confirmation can never be emitted for a rolled-back booking
+// and no external I/O ever runs inside the booking transaction.
+model OutboxEvent {
+  id            String    @id @default(uuid()) @db.Uuid
+  eventType     String    @map("event_type")
+  aggregateId   String    @map("aggregate_id") @db.Uuid
+  payload       Json
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+  attemptCount  Int       @default(0) @map("attempt_count")
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_event")
+}
