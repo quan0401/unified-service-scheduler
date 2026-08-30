@@ -104,18 +104,18 @@ that makes the common case fast; none of it is trusted to be sufficient.
 
 ### Component roles
 
-| Component                      | Role                                                                 | Why it exists                                                                                                                                                             |
-| ------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Request context middleware** | Assigns a correlation ID per request, honours inbound `X-Request-Id` | A booking that retries emits several log lines; without a shared id they cannot be reassembled. Uses `AsyncLocalStorage` so domain code never carries a transport concern |
-| **Throttler**                  | Per-IP rate limiting, two windows (burst + sustained)                | Cheap abuse protection. Per-IP rather than per-customer only because there is no auth — named as a limitation in §8                                                       |
-| **Zod validation**             | Rejects malformed requests before any handler runs                   | One schema yields the runtime validator, the TypeScript type, _and_ the OpenAPI document, so the three cannot drift                                                       |
-| **Availability**               | Generates candidate slots, marks each free or busy                   | Split in two: a **pure function** for slot shape, one query for occupancy. Advisory by design — never a reservation                                                       |
-| **Booking repository**         | The atomic claim statement                                           | Selection and insertion in **one** statement, so there is no window between finding a free bay and taking it                                                              |
-| **Appointments service**       | Domain rules, retry policy, idempotency                              | Holds no locks and opens no long transactions; mutual exclusion is delegated entirely to the database                                                                     |
-| **Exception filter**           | Maps domain errors to HTTP status codes                              | A single exit point means no driver message or stack trace can escape into a response                                                                                     |
-| **Hold sweeper**               | Deletes lapsed reservations                                          | Housekeeping, _not_ correctness — see §5. Uncoordinated across replicas by design: the delete is idempotent                                                               |
-| **Outbox relay**               | Publishes confirmation events                                        | Keeps all network I/O off the booking path. Claims batches with `FOR UPDATE SKIP LOCKED`, so replicas partition work rather than duplicate it                             |
-| **PostgreSQL**                 | Source of truth **and** the concurrency arbiter                      | The only component that sees both racing writes, so the only one that can adjudicate                                                                                      |
+| Component                      | Role                                                                 | Why it exists                                                                                                                                                                                                                                                                               |
+| ------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Request context middleware** | Assigns a correlation ID per request, honours inbound `X-Request-Id` | A booking that retries emits several log lines; without a shared id they cannot be reassembled. Uses `AsyncLocalStorage` so domain code never carries a transport concern                                                                                                                   |
+| **Throttler**                  | Per-IP rate limiting, two windows (burst + sustained)                | Cheap abuse protection. Per-IP rather than per-customer only because there is no auth — named as a limitation in §8                                                                                                                                                                         |
+| **Zod validation**             | Rejects malformed requests before any handler runs                   | One schema yields the runtime validator, the TypeScript type, _and_ the OpenAPI document, so the three cannot drift                                                                                                                                                                         |
+| **Availability**               | Generates candidate slots, marks each free or busy                   | Split in two: a **pure function** for slot shape, one query for occupancy. Advisory by design — never a reservation                                                                                                                                                                         |
+| **Booking repository**         | The atomic claim statement                                           | Selection and insertion in **one** statement, so there is no window between finding a free bay and taking it                                                                                                                                                                                |
+| **Appointments service**       | Domain rules, retry policy, idempotency                              | Holds no locks and opens no long transactions; mutual exclusion is delegated entirely to the database                                                                                                                                                                                       |
+| **Exception filter**           | Maps domain errors to HTTP status codes                              | A single exit point means no driver message or stack trace can escape into a response                                                                                                                                                                                                       |
+| **Hold sweeper**               | Deletes lapsed reservations                                          | Housekeeping, _not_ correctness — see §5. Uncoordinated across replicas by design: the delete is idempotent                                                                                                                                                                                 |
+| **Outbox relay**               | Publishes confirmation events                                        | Keeps all network I/O off the booking path. Claims batches with `FOR UPDATE SKIP LOCKED`, so replicas partition work rather than duplicate it. A partial index on `(created_at) WHERE published_at IS NULL` keeps that claim scanning only the unpublished tail rather than the whole table |
+| **PostgreSQL**                 | Source of truth **and** the concurrency arbiter                      | The only component that sees both racing writes, so the only one that can adjudicate                                                                                                                                                                                                        |
 
 ### Code organization
 
@@ -149,37 +149,30 @@ TypeScript type, and the published OpenAPI document all derive from one
 declaration. It exports plain Zod and depends only on `zod` — applying
 `createZodDto` there would drag NestJS into anything a browser imports.
 
-That prediction has since been tested rather than left as an assertion. A demo
-client now lives at `apps/web` — a small Vite and React application that
-consumes the package directly, importing its types and calling
-`createHoldSchema.safeParse` on the booking form before submitting. Because the
-browser and the server validate against the same declaration, the drift this
-package exists to prevent cannot occur silently; a shape change breaks the
-client's typecheck. The client resolves the package to its _source_ rather than
-its build output, matching the precedent already set in
-`apps/api/jest.config.js`, so a stale `dist` can never let types and runtime
-disagree.
+That prediction has since been tested rather than left as an assertion. The demo
+client at `apps/web` consumes the package directly, importing its types and
+calling `createHoldSchema.safeParse` on the booking form before submitting, and
+resolving the package to its _source_ rather than its build output — matching the
+precedent in `apps/api/jest.config.js`, so a stale `dist` cannot let types and
+runtime disagree. A shape change now breaks the client's typecheck, which is
+exactly the drift this package exists to make loud. It is a harness for the
+stubbed layer, not a second implemented one; the OpenAPI document and the cURL
+walkthrough remain the contract the brief asked for.
 
-The client does not change the shape of the submission: the backend remains the
-implemented layer, and the OpenAPI document and cURL walkthrough remain the
-contract the brief asked for. What it adds is legibility. The concurrency
-guarantee was previously only demonstrable through a shell loop and a `psql`
-count; it can now be watched. The one place the client still restates a server
-shape in its own words is the appointment record, which `@scheduler/contracts`
-does not publish because it exists only as a Prisma inference — that is isolated
-to a single file, so publishing an `AppointmentView` later is a deletion rather
-than a refactor.
-
-Adding it required exactly one endpoint, `GET /customers`. Seed identifiers are
+Two details are worth recording. The one shape the client still restates in its
+own words is the appointment record, which `@scheduler/contracts` does not
+publish because it exists only as a Prisma inference — isolated to a single file,
+so publishing an `AppointmentView` later is a deletion rather than a refactor.
+And it required exactly one new endpoint, `GET /customers`: seed identifiers are
 `gen_random_uuid()`, so without it the only way to discover a customer was the
-seed script's stdout — acceptable for a cURL walkthrough, not for a picker.
+seed script's stdout — fine for a cURL walkthrough, useless for a picker.
 
 Prisma, the domain error classes, and the slot generator stay inside the API.
 Each has exactly one consumer; extracting them would add import boundaries
 without adding seams, which is structure that signals rigour without doing any.
 
-Turborepo is honest about its size here: with two packages its task graph saves
-little wall-clock time. It earns its place by making build order explicit —
+Turborepo is honest about its size here: with three workspaces its task graph
+saves little wall-clock time. It earns its place by making build order explicit —
 contracts must compile before the app that consumes it — and by keeping
 database-backed tasks marked `"cache": false`, since their result depends on
 live database state rather than on file inputs. A cached "pass" for a suite
@@ -229,6 +222,15 @@ be application-side filtering, which reintroduces the read-then-write gap.
 **Status is `HELD | CONFIRMED | CANCELLED | COMPLETED`.** Cancelled rows are
 retained for audit but excluded from conflict checks, so cancelling frees a slot
 without destroying history.
+
+Two CHECK constraints ride along in the same migration, because an enum alone
+does not keep the row coherent. `appointment_end_after_start` refuses an inverted
+range, which would otherwise make `tstzrange` throw at insert time rather than be
+rejected as data. `appointment_hold_expiry_only_when_held` asserts
+`(status = 'HELD') = (hold_expires_at IS NOT NULL)`, so a hold cannot exist
+without a deadline and a confirmed booking cannot carry a stale one — the
+invariant that keeps §5's in-place promotion from leaving an expiry behind on a
+row that is no longer a hold.
 
 ---
 
@@ -312,7 +314,8 @@ pool drops the conflict rate from roughly O(N) toward zero.
 - `lock_timeout = 2s`, `statement_timeout = 5s` — requests fail fast rather than
   queueing and exhausting the connection pool. Under load, queueing is how one
   hot slot becomes a service-wide outage.
-- Isolation stays `READ COMMITTED`. `SERIALIZABLE` would add `40001` retries for
+- Isolation stays `READ COMMITTED` — PostgreSQL's default, deliberately not
+  overridden anywhere in the codebase. `SERIALIZABLE` would add `40001` retries for
   no benefit, because the constraint is the authority, not the snapshot.
 
 ### Booking flow
@@ -338,7 +341,7 @@ sequenceDiagram
 
     loop up to 3 attempts
         A->>P: atomic claim statement
-        Note over A,P: selects resources, inserts the appointment,<br/>and writes the outbox event — ONE statement,<br/>therefore one transaction
+        Note over A,P: selects resources, inserts the appointment,<br/>and — when the status is CONFIRMED — writes<br/>the outbox event. ONE statement, one transaction
         alt one row returned
             P-->>A: appointment (event already durable)
             A-->>C: 201 Created
@@ -490,10 +493,10 @@ query, which shows that a request touched the database several times but not
 why — a retry storm and a slow query look alike. Two manual spans supply the
 missing structure:
 
-| Span | Meaning | Attributes |
-| --- | --- | --- |
-| `booking.book` / `booking.hold` | one request | `booking.dealership_id`, `booking.service_type_id`, `booking.start_at`, `booking.outcome`, `booking.attempts` |
-| `booking.attempt` | one claim on the slot | `booking.attempt_number`, `booking.max_attempts` |
+| Span                            | Meaning               | Attributes                                                                                                    |
+| ------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `booking.book` / `booking.hold` | one request           | `booking.dealership_id`, `booking.service_type_id`, `booking.start_at`, `booking.outcome`, `booking.attempts` |
+| `booking.attempt`               | one claim on the slot | `booking.attempt_number`, `booking.max_attempts`                                                              |
 
 A contended booking is then legible as what it is: one `booking.book` span
 containing several `booking.attempt` children, the losers carrying a recorded
@@ -549,6 +552,14 @@ make the outage worse.
   and finish independently, so a consumer needing per-aggregate ordering must
   impose it itself. Ordering was never promised, but a single-replica relay
   would have appeared to provide it.
+- **The relay holds its row lock across the whole dispatch loop.** That is
+  sound only because `dispatch()` is currently an in-process stub. Point it at a
+  real broker and the lock spans a network call: one slow consumer stalls a
+  batch, and the transaction timeout becomes the ceiling on batch size. The fix
+  is not more locking but less — claim, commit, then publish, with a
+  `claimed_until` lease column and a reaper for leases that expire. Worth naming
+  because §9's "no lease to expire" is true of the design as it stands and stops
+  being true at the first real broker call.
 
 ---
 
@@ -650,6 +661,7 @@ backed by something that was run, not something that was asserted.
 | Layer                     | Count | What it proves                                                                                                                         |
 | ------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | **Unit** (no database)    | 23    | Slot generation across DST transitions, closed days, closing-time overrun, foreign timezones, input validation, configuration parsing  |
+| **Observability**         | 16    | Probe filtering shared by logs and traces, span attributes and the outcome vocabulary, and the tracer staying inert with no exporter   |
 | **Constraint proof**      | 12    | The database rejects overlaps — asserted _before_ any service code existed, so nothing downstream trusts an unverified guarantee       |
 | **Booking rules**         | 21    | Booking, refusals with precise codes, holds, hold ownership, idempotency, cancellation, reads                                          |
 | **Availability**          | 10    | Occupancy reflects qualification, capability, shift coverage, and existing bookings                                                    |
@@ -657,7 +669,11 @@ backed by something that was run, not something that was asserted.
 | **Outbox relay**          | 5     | Concurrent relays dispatch each event exactly once — the test fails against an uncoordinated poll, which duplicates _and_ under-covers |
 | **Concurrency**           | 5     | The decisive tests — see below                                                                                                         |
 
-**Coverage: 94.7% statements, 96.0% lines, 97.4% functions** (107 tests).
+**Coverage: 93.9% statements, 95.0% lines, 97.4% functions** (107 tests, 11 suites).
+
+`apps/web` adds 14 vitest cases over the outcome classifier, timezone rendering,
+and error-copy fallback. They are not in the 107 and not in that coverage figure,
+which measures the API alone; root `pnpm test` runs both, for 53 unit cases.
 
 The decisive test fires **200 simultaneous bookings at one slot backed by one
 bay** and asserts exactly one `201`, 199 `409`, and exactly one row in the
@@ -670,11 +686,14 @@ Related cases: capacity 5 against 200 bookers fills every bay exactly once
 mixed hold/booking traffic still yields one winner; and concurrent requests
 sharing an idempotency key produce one appointment.
 
-Measured on the reference machine: 200 concurrent requests settle in **258 ms**,
-with `booking_conflicts_total` at zero — the winner commits fast enough that
-losers' availability filters already see the slot taken. The exclusion
-constraint is the backstop for the genuinely simultaneous window, not the
-everyday path.
+Measured in-process: the 200-booker case settles in **~520 ms** across repeated
+runs. Fired instead as 200 shell requests at the containerised API, the outcome
+is the same 1 × `201` and 199 × `409`, with `booking_retry_exhausted_total` at
+zero and `booking_conflicts_total` at **2**. That last number is the interesting
+one: 198 losers never reached the constraint at all, because the winner commits
+fast enough that their availability filter already sees the slot taken. Two did.
+The exclusion constraint is the backstop for the genuinely simultaneous window,
+not the everyday path — but it is a backstop that fires, not decoration.
 
 ```bash
 cd apps/api
@@ -683,5 +702,14 @@ pnpm test:integration  # integration + concurrency, needs PostgreSQL
 pnpm test:cov          # combined coverage
 ```
 
-`docs/curl-walkthrough.md` reproduces the whole flow by hand, including a
+`apps/api/docs/curl-walkthrough.md` reproduces the whole flow by hand, including a
 50-request concurrency demo.
+
+**None of this is trusted to be run by hand.** `.github/workflows/ci.yml` runs
+typecheck, build, the unit suite, and the integration suite on every push,
+against a real `postgres:16-alpine` service database — because the guarantee this
+design rests on is a database constraint, and a pipeline that mocked the database
+away would verify none of it. Coverage is deliberately not a gate: the number is
+reported, not enforced, since a threshold pressures tests toward whatever is
+cheap to cover rather than toward the concurrency behaviour that actually
+matters.
