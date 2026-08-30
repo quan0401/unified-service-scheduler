@@ -118,8 +118,9 @@ The API is on **13000** and PostgreSQL on **55432** — non-default on purpose, 
 the stack runs alongside a local PostgreSQL and a local `pnpm start:dev` without
 a port clash. Swagger UI: `http://localhost:13000/docs`.
 
-**Database files live in `./.data/postgres`**, a bind mount inside the
-repository rather than a Docker-managed named volume. State is visible and
+**State lives in `./.data`** — `postgres/` always, and `jaeger/` when the
+observability profile is running — bind-mounted inside the repository rather
+than in Docker-managed named volumes. State is visible and
 disposable — `docker compose down && rm -rf .data` is a complete reset — at the
 cost of bind-mount I/O, which is noticeably slower on macOS and Windows. A
 production deployment would use a named volume or a managed database. The
@@ -154,9 +155,15 @@ exclusion-constraint rejection that caused the retry. That is the whole
 concurrency argument of this service, visible as data rather than described in
 prose.
 
-Jaeger stores traces in memory, so nothing is written under `./.data` and they
-vanish on restart. The default `docker compose up -d` is unaffected — no
-profile, no Jaeger, and the API's tracing guard short-circuits as before.
+Traces persist in `./.data/jaeger`, alongside the database, so a trace you were
+reading is still there tomorrow. The all-in-one image defaults to ephemeral
+tmpfs storage, which loses every span the moment the container stops — unhelpful
+for a tool whose entire purpose is looking at what happened — so it runs on
+Badger instead, which keeps 72 hours by default and therefore does not grow
+without bound.
+
+The default `docker compose up -d` is unaffected — no profile, no Jaeger, and
+the API's tracing guard short-circuits as before.
 
 One trap worth knowing: a profiled service is invisible to any command that does
 not name its profile, **including `down`**. A plain `docker compose down` stops
@@ -167,6 +174,9 @@ Name the profile to tear the whole stack down:
 ```bash
 docker compose --profile observability down
 ```
+
+`./.data/jaeger` survives that, exactly as `./.data/postgres` does. `rm -rf .data`
+clears both.
 
 ---
 

@@ -517,7 +517,10 @@ to its trace; the request id minted in `genReqId` is set on the active span as
 Inert unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set — exporting to nowhere adds
 latency and noisy connection errors in development and CI. `docker compose
 --profile observability` starts Jaeger to export to, so the claims above are
-demonstrable rather than asserted.
+demonstrable rather than asserted. Its spans persist to `./.data/jaeger` on
+Badger with the default 72-hour retention, rather than the image's default
+ephemeral storage: a trace store that forgets everything on restart cannot
+answer the question it exists to answer.
 
 **Health** — `/health` (liveness, touches nothing) is separate from
 `/health/ready` (readiness, pings the database) so a database blip removes the

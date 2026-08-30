@@ -75,10 +75,17 @@ services:
   # A contended booking appears as one `booking.book` span containing several
   # `booking.attempt` children -- a retry storm, visibly a retry storm.
   #
-  # Storage is in-memory: traces vanish on restart and nothing is written under
-  # ./.data. No `depends_on` from the api either, because a profiled service
-  # cannot be depended on from an unprofiled one -- and it does not need to be,
-  # since OTLP export over HTTP tolerates an absent collector.
+  # Traces live in ./.data/jaeger, alongside the database, so a trace you were
+  # reading is still there after a restart. The all-in-one image defaults to
+  # ephemeral tmpfs storage, which loses every span when the container stops --
+  # unhelpful for a tool whose entire purpose is looking at what happened.
+  #
+  # Badger keeps 72h by default (--badger.span-store-ttl), so the directory does
+  # not grow without bound the way an untended trace store otherwise would.
+  #
+  # No `depends_on` from the api, because a profiled service cannot be depended
+  # on from an unprofiled one -- and it does not need to be, since OTLP export
+  # over HTTP tolerates an absent collector.
   #
   # Tearing down needs the profile too. A plain `docker compose down` does not
   # see this service and leaves it running; `--remove-orphans` does not catch it
@@ -88,9 +95,24 @@ services:
     image: jaegertracing/all-in-one:1.62.0
     container_name: scheduler-jaeger
     profiles: ['observability']
+    # The image runs as uid 10001. A bind-mounted directory created by Docker is
+    # owned by root, which that user cannot write to on Linux, so the storage
+    # paths sit under one mount point the entrypoint can chown-free write into.
+    user: '${JAEGER_UID:-10001}:${JAEGER_GID:-10001}'
     environment:
       COLLECTOR_OTLP_ENABLED: 'true'
+      SPAN_STORAGE_TYPE: badger
+      BADGER_EPHEMERAL: 'false'
+      BADGER_DIRECTORY_VALUE: /badger/values
+      BADGER_DIRECTORY_KEY: /badger/keys
+    volumes:
+      - ./.data/jaeger:/badger
     ports:
       - '16686:16686' # web UI
       - '4318:4318' # OTLP over HTTP
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:14269/']
+      interval: 5s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
