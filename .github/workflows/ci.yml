@@ -79,3 +79,79 @@ jobs:
       # covers test/integration/** and the 200-way race in test/concurrency/**.
       - name: Integration and concurrency tests
         run: pnpm test:integration
+
+  publish:
+    name: build and push images
+    needs: verify
+    # Only from main, and only on a push. A pull request -- including one from a
+    # fork -- must never reach this job: it would be a path from an untrusted
+    # branch to a role that can write to the registry the production host pulls
+    # from. The IAM trust policy pins the same condition independently, so this
+    # is a guard, not the guard.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      # Required for the OIDC token exchange. `contents: read` is spelled out
+      # because naming any permission drops the rest to none.
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # No long-lived access keys anywhere. The role is assumed with a token
+      # GitHub mints for this workflow run, scoped by the trust policy to this
+      # repository and this branch.
+      - name: Assume the ECR push role
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v4
+
+      # linux/amd64 because the host is t3a.small. Runner and target share an
+      # architecture, so nothing is emulated and the build is native on both
+      # ends. Changing the instance to Graviton means changing this line and
+      # the AMI parameter in infra/config.sh together.
+      #
+      # Tagged with the commit SHA as well as latest: infra/deploy.sh pins the
+      # SHA, so what runs on the host is always traceable to one commit.
+      - name: Build and push the API image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/scheduler-api:${{ github.sha }}
+            ${{ steps.ecr.outputs.registry }}/scheduler-api:latest
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Build and push the web image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: infra/Dockerfile.web
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/scheduler-web:${{ github.sha }}
+            ${{ steps.ecr.outputs.registry }}/scheduler-web:latest
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+      - name: Report the deployable tag
+        run: |
+          echo "### Images published" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "IMAGE_TAG=${{ github.sha }} ./infra/deploy.sh" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

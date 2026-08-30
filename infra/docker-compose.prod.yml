@@ -1,0 +1,66 @@
+# Production stack for the single-instance deployment. Rendered onto the EC2
+# host by infra/user-data.sh, which also writes the .env file this reads.
+#
+# Differences from the root docker-compose.yml, all deliberate:
+#   * Images are pulled from ECR, not built here. A t4g.small has 2 GB of RAM;
+#     a pnpm install plus two TypeScript builds on that box is a coin flip.
+#     Building on the developer's machine is also an exact architecture match --
+#     Apple silicon and Graviton are both arm64, so no emulation is involved.
+#   * Only nginx publishes a port. The API and the database are reachable on the
+#     compose network and nowhere else, so the security group has one way in.
+#   * The database password is generated per deploy rather than being the
+#     literal `scheduler`.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: scheduler-postgres
+    environment:
+      POSTGRES_USER: scheduler
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: scheduler
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U scheduler -d scheduler']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    image: ${API_IMAGE}
+    container_name: scheduler-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://scheduler:${POSTGRES_PASSWORD}@postgres:5432/scheduler?schema=public
+      PORT: '3000'
+      LOG_LEVEL: info
+      # Same-origin through CloudFront, so no preflight is issued and this is
+      # belt-and-braces. Pinned to the distribution rather than '*' so a stray
+      # cross-origin caller is refused instead of quietly served.
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      HOLD_TTL_SECONDS: '120'
+      DB_LOCK_TIMEOUT_MS: '2000'
+      DB_STATEMENT_TIMEOUT_MS: '5000'
+      # Every request arrives from a CloudFront edge address, so per-IP
+      # throttling buckets all visitors together and the race demo -- hundreds
+      # of concurrent POSTs -- would trip it instantly. Raised for the same
+      # reason the local compose file raises it: the guard stays wired, so a
+      # misconfiguration still surfaces, but it is not measuring the demo.
+      THROTTLE_BURST_LIMIT: '10000'
+      THROTTLE_SUSTAINED_LIMIT: '100000'
+    restart: unless-stopped
+
+  web:
+    image: ${WEB_IMAGE}
+    container_name: scheduler-web
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '80:80'
+    restart: unless-stopped
