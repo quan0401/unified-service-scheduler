@@ -24,14 +24,18 @@ ROOT_VOLUME_GB=20
 # Resolved at launch by EC2 itself, so the AMI is never pinned in git.
 AMI_SSM_PARAM="/aws/service/canonical/ubuntu/server/24.04/stable/current/${INSTANCE_ARCH}/hvm/ebs-gp3/ami-id"
 
-# CloudFront's origin-facing ranges. Region-specific id; AWS keeps the contents
-# current. Weight 55 against a default 60-rule security group quota.
-CF_PREFIX_LIST_ID="pl-31a34658"
-
-# Managed CloudFront policies. Ids are global and documented.
-CF_CACHE_OPTIMIZED="658327ea-f89d-4fab-a63d-7e88639e58f6"
-CF_CACHE_DISABLED="4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
-CF_ORIGIN_ALL_VIEWER="216adef6-5c7f-47e4-b989-5492eafa07d3"
+# TLS. The instance terminates it with a Let's Encrypt certificate issued for
+# the Elastic IP, which is why no domain is needed. IP certificates are only
+# issued under the six-day "shortlived" profile, so certbot's timer on the host
+# is what keeps the site working.
+#
+# CloudFront would have supplied this instead, on a *.cloudfront.net name, and
+# would additionally have kept the origin private behind prefix list
+# pl-31a34658 with managed policies CachingOptimized 658327ea-..., CachingDisabled
+# 4135ea2d-... and AllViewer 216adef6-.... It is unavailable: this account
+# returns "Your account must be verified before you can add new CloudFront
+# resources", which requires an AWS Support case. Recorded here because it is
+# the first thing to revisit if that verification ever lands.
 
 # Resource names. Used by both deploy.sh and teardown.sh; teardown deletes
 # exactly what these name and nothing else.
@@ -42,7 +46,6 @@ EC2_ROLE_NAME="${PROJECT}-ec2-role"
 EC2_PROFILE_NAME="${PROJECT}-ec2-profile"
 SG_NAME="${PROJECT}-origin-sg"
 INSTANCE_NAME="${PROJECT}-host"
-CF_COMMENT="${PROJECT} demo distribution"
 OIDC_PROVIDER_URL="token.actions.githubusercontent.com"
 
 ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"

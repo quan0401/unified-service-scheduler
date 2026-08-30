@@ -6,12 +6,16 @@
 #   ./infra/deploy.sh                 # deploy images tagged with HEAD
 #   IMAGE_TAG=<sha> ./infra/deploy.sh # deploy a specific build
 #
-# Ordering is deliberate and avoids a chicken-and-egg. The API's CORS_ORIGIN
-# has to name the CloudFront URL, and CloudFront's origin has to name the
-# instance's DNS. Both are satisfied by allocating the address first, deriving
-# the origin hostname from it, and creating the distribution before the
-# instance -- CreateDistribution returns the domain immediately, long before
-# the distribution finishes deploying.
+# The address is allocated before the instance because everything else depends
+# on knowing it: the certificate is issued *for* that IP, and the API's
+# CORS_ORIGIN has to name the resulting https:// URL.
+#
+# CloudFront was the original design and would have supplied TLS on a
+# *.cloudfront.net name. This account cannot create distributions -- AWS
+# returns "Your account must be verified before you can add new CloudFront
+# resources", which needs a support case. The instance terminates TLS itself
+# instead, using a Let's Encrypt certificate for the Elastic IP. See
+# myDocs/aws-deployment-shape-decision.md.
 
 source "$(dirname "$0")/config.sh"
 
@@ -43,69 +47,8 @@ EIP_ADDR=$(aws ec2 describe-addresses --allocation-ids "$EIP_ALLOC" --query 'Add
 ORIGIN_DNS="ec2-${EIP_ADDR//./-}.${AWS_DEFAULT_REGION}.compute.amazonaws.com"
 echo "    ${EIP_ADDR}  ->  ${ORIGIN_DNS}"
 
-# --- CloudFront ---------------------------------------------------------------
-log "CloudFront distribution"
-DIST_ID=$(aws cloudfront list-distributions \
-  --query "DistributionList.Items[?Comment=='${CF_COMMENT}'].Id | [0]" --output text 2>/dev/null || echo "None")
-
-if [ "$DIST_ID" = "None" ] || [ -z "$DIST_ID" ]; then
-  DIST_CONFIG=$(cat <<JSON
-{
-  "CallerReference": "${PROJECT}-$(date +%s)",
-  "Comment": "${CF_COMMENT}",
-  "Enabled": true,
-  "Origins": {
-    "Quantity": 1,
-    "Items": [{
-      "Id": "ec2-origin",
-      "DomainName": "${ORIGIN_DNS}",
-      "CustomOriginConfig": {
-        "HTTPPort": 80,
-        "HTTPSPort": 443,
-        "OriginProtocolPolicy": "http-only",
-        "OriginSslProtocols": { "Quantity": 1, "Items": ["TLSv1.2"] },
-        "OriginReadTimeout": 30,
-        "OriginKeepaliveTimeout": 5
-      }
-    }]
-  },
-  "DefaultCacheBehavior": {
-    "TargetOriginId": "ec2-origin",
-    "ViewerProtocolPolicy": "redirect-to-https",
-    "CachePolicyId": "${CF_CACHE_OPTIMIZED}",
-    "AllowedMethods": {
-      "Quantity": 2, "Items": ["GET", "HEAD"],
-      "CachedMethods": { "Quantity": 2, "Items": ["GET", "HEAD"] }
-    },
-    "Compress": true
-  },
-  "CacheBehaviors": {
-    "Quantity": 1,
-    "Items": [{
-      "PathPattern": "/api/*",
-      "TargetOriginId": "ec2-origin",
-      "ViewerProtocolPolicy": "redirect-to-https",
-      "CachePolicyId": "${CF_CACHE_DISABLED}",
-      "OriginRequestPolicyId": "${CF_ORIGIN_ALL_VIEWER}",
-      "AllowedMethods": {
-        "Quantity": 7,
-        "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
-        "CachedMethods": { "Quantity": 2, "Items": ["GET", "HEAD"] }
-      },
-      "Compress": true
-    }]
-  },
-  "PriceClass": "PriceClass_All",
-  "ViewerCertificate": { "CloudFrontDefaultCertificate": true }
-}
-JSON
-)
-  DIST_ID=$(aws cloudfront create-distribution --distribution-config "$DIST_CONFIG" \
-    --query 'Distribution.Id' --output text)
-fi
-CF_DOMAIN=$(aws cloudfront get-distribution --id "$DIST_ID" --query 'Distribution.DomainName' --output text)
-APP_URL="https://${CF_DOMAIN}"
-echo "    ${DIST_ID}  ->  ${APP_URL}"
+APP_URL="https://${EIP_ADDR}"
+echo "    app URL ${APP_URL}"
 
 # --- Security group -----------------------------------------------------------
 log "Security group ${SG_NAME}"
@@ -114,16 +57,21 @@ SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=${SG_
   --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "None")
 if [ "$SG_ID" = "None" ] || [ -z "$SG_ID" ]; then
   SG_ID=$(aws ec2 create-security-group --group-name "$SG_NAME" \
-    --description "Origin for ${CF_COMMENT}; CloudFront only" --vpc-id "$VPC_ID" \
+    --description "Public endpoint for the ${PROJECT} demo" --vpc-id "$VPC_ID" \
     --query 'GroupId' --output text)
-  # Only CloudFront's origin-facing ranges. The instance is not reachable on
-  # its public address, so bypassing the CDN is not possible. No port 22 rule:
-  # shell access is Session Manager, which needs no inbound anything.
+  # Open to the internet on both ports. With CloudFront in front this would
+  # have been the CloudFront prefix list only, but the instance is now the
+  # public endpoint, so it has to accept public traffic.
   #
-  # This prefix list has weight 55 against a default quota of 60 rules, so
-  # there is room for four more rules here and no more.
+  # Port 80 is not optional and is not just a redirect convenience: Let's
+  # Encrypt validates the http-01 challenge over plain HTTP, on every renewal.
+  # Closing it would work until the certificate expired six days later.
+  #
+  # Still no port 22. Shell access is Session Manager, which opens nothing.
   aws ec2 authorize-security-group-ingress --group-id "$SG_ID" \
-    --ip-permissions "IpProtocol=tcp,FromPort=80,ToPort=80,PrefixListIds=[{PrefixListId=${CF_PREFIX_LIST_ID}}]" \
+    --ip-permissions \
+      "IpProtocol=tcp,FromPort=80,ToPort=80,IpRanges=[{CidrIp=0.0.0.0/0,Description=ACME http-01 and redirect}]" \
+      "IpProtocol=tcp,FromPort=443,ToPort=443,IpRanges=[{CidrIp=0.0.0.0/0,Description=Application}]" \
     >/dev/null
 fi
 echo "    ${SG_ID}"
@@ -163,6 +111,7 @@ if [ "$INSTANCE_ID" = "None" ] || [ -z "$INSTANCE_ID" ]; then
       -e "s|__API_IMAGE__|${API_IMAGE}|g" \
       -e "s|__WEB_IMAGE__|${WEB_IMAGE}|g" \
       -e "s|__CORS_ORIGIN__|${APP_URL}|g" \
+      -e "s|__PUBLIC_IP__|${EIP_ADDR}|g" \
       -e "s|__COMPOSE_B64__|${COMPOSE_B64}|g" \
       "$(dirname "$0")/user-data.sh" > "$USER_DATA"
 
@@ -182,6 +131,8 @@ echo "    ${INSTANCE_ID}"
 
 log "Waiting for instance to run"
 aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+# Associate as early as possible. cloud-init will ask Let's Encrypt to validate
+# this address, and that only succeeds once the address actually routes here.
 aws ec2 associate-address --instance-id "$INSTANCE_ID" --allocation-id "$EIP_ALLOC" >/dev/null
 echo "    ${EIP_ADDR} associated"
 
@@ -190,10 +141,10 @@ cat <<SUMMARY
   URL          ${APP_URL}
   Health       ${APP_URL}/api/health
   Instance     ${INSTANCE_ID}  (${INSTANCE_TYPE}, ${EIP_ADDR})
-  Distribution ${DIST_ID}
   Image tag    ${IMAGE_TAG}
 
-  Bootstrap takes a few minutes and CloudFront a few more. Follow it with:
+  Bootstrap takes a few minutes -- Docker install, image pull, migrations,
+  seed, then certificate issuance. Follow it with:
     aws ssm start-session --target ${INSTANCE_ID}
     sudo tail -f /var/log/scheduler-bootstrap.log
 
