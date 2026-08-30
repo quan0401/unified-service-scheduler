@@ -480,13 +480,44 @@ Inbound ids are honoured so a trace begun at the edge stays continuous.
 metrics scrapes are excluded from access logging — high frequency, no
 diagnostic value.
 
-**Tracing** — OpenTelemetry with HTTP and `pg` auto-instrumentation, initialised
-before any instrumented module is imported (patching afterwards silently
-produces no spans, which is indistinguishable from tracing being off). Tracing
-earns its place specifically on the booking path: a retry storm is invisible in
-logs, where each attempt looks like an ordinary query, but obvious as a trace —
-one request span containing several database spans, the earlier ones ending in
-constraint rejections. Inert unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+**Tracing** — OpenTelemetry, initialised before any instrumented module is
+imported. That ordering is load-bearing: auto-instrumentation works by patching
+`http` and `pg` at require time, and patching afterwards silently produces no
+spans, which is indistinguishable from tracing being off.
+
+Auto-instrumentation alone is not enough here. It yields one `pg` span per
+query, which shows that a request touched the database several times but not
+why — a retry storm and a slow query look alike. Two manual spans supply the
+missing structure:
+
+| Span | Meaning | Attributes |
+| --- | --- | --- |
+| `booking.book` / `booking.hold` | one request | `booking.dealership_id`, `booking.service_type_id`, `booking.start_at`, `booking.outcome`, `booking.attempts` |
+| `booking.attempt` | one claim on the slot | `booking.attempt_number`, `booking.max_attempts` |
+
+A contended booking is then legible as what it is: one `booking.book` span
+containing several `booking.attempt` children, the losers carrying a recorded
+`23P01` exception, with a `booking.race_lost` event marking each on the parent's
+timeline. `booking.outcome` uses the same vocabulary as the metrics
+(`confirmed · replayed · unavailable · contended · rejected`), so a suspicious
+counter and the traces behind it are read together rather than reconciled by
+guesswork. No customer, vehicle, or appointment id becomes a span attribute —
+those identify a person, and a trace backend is the component that retains
+longest and secures least.
+
+Health probes and metric scrapes are excluded from traces, filtered against the
+same `probe-paths.ts` list that excludes them from access logs, so an endpoint
+cannot end up quiet in one and noisy in the other.
+
+**Logs and traces join in both directions.** `instrumentation-pino` injects
+`trace_id` and `span_id` into every log record, which gets you from a log line
+to its trace; the request id minted in `genReqId` is set on the active span as
+`app.request_id`, which gets you back.
+
+Inert unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set — exporting to nowhere adds
+latency and noisy connection errors in development and CI. `docker compose
+--profile observability` starts Jaeger to export to, so the claims above are
+demonstrable rather than asserted.
 
 **Health** — `/health` (liveness, touches nothing) is separate from
 `/health/ready` (readiness, pings the database) so a database blip removes the
@@ -623,7 +654,7 @@ backed by something that was run, not something that was asserted.
 | **Outbox relay**          | 5     | Concurrent relays dispatch each event exactly once — the test fails against an uncoordinated poll, which duplicates _and_ under-covers |
 | **Concurrency**           | 5     | The decisive tests — see below                                                                                                         |
 
-**Coverage: 93.6% statements, 94.8% lines, 97.1% functions** (91 tests).
+**Coverage: 94.7% statements, 96.0% lines, 97.4% functions** (107 tests).
 
 The decisive test fires **200 simultaneous bookings at one slot backed by one
 bay** and asserts exactly one `201`, 199 `409`, and exactly one row in the
