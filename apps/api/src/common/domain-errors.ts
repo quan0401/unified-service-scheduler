@@ -93,6 +93,21 @@ export class HoldExpiredError extends DomainError {
   }
 }
 
+/**
+ * The reservation being confirmed was placed by a different customer.
+ *
+ * Distinct from VEHICLE_NOT_OWNED, which it is easy to reach for here: the
+ * vehicle may be perfectly legitimate, and it is the *hold* that belongs to
+ * someone else. A client shown "this vehicle is not yours" for a hold mix-up
+ * would go looking in the wrong place.
+ */
+export class HoldNotOwnedError extends DomainError {
+  readonly code = 'HOLD_NOT_OWNED' as const;
+  constructor(holdId: string, customerId: string) {
+    super('This reservation belongs to a different customer.', { holdId, customerId });
+  }
+}
+
 export class AppointmentNotCancellableError extends DomainError {
   readonly code = 'APPOINTMENT_NOT_CANCELLABLE' as const;
   constructor(status: string) {

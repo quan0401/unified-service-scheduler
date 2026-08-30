@@ -21,6 +21,22 @@ export const EXCLUSION_VIOLATION = '23P01';
 /** unique_violation -- e.g. a replayed idempotency key. */
 export const UNIQUE_VIOLATION = '23505';
 
+/**
+ * deadlock_detected -- the other way a booking can lose a race.
+ *
+ * An exclusion constraint does not reject a conflicting row at insert time. It
+ * is index-backed and detects the conflict in a scan performed *after* the
+ * tuple is written, so a second inserter finds an in-progress tuple and waits
+ * on the first transaction's outcome. When two backends do that to each other
+ * simultaneously, neither can proceed and PostgreSQL resolves it by aborting
+ * one of them with this SQLSTATE.
+ *
+ * The aborted request lost a race exactly as surely as one rejected with 23P01.
+ * Treating it as an unexpected fault would turn an ordinary contention outcome
+ * into a 500, which is why the booking loop retries on it.
+ */
+export const DEADLOCK_DETECTED = '40P01';
+
 interface PrismaLikeError {
   code?: unknown;
   meta?: { code?: unknown };
@@ -58,6 +74,23 @@ export function isExclusionViolation(error: unknown): boolean {
 
 export function isUniqueViolation(error: unknown): boolean {
   return isPostgresError(error, UNIQUE_VIOLATION);
+}
+
+/** True when the database aborted this transaction to break a deadlock. */
+export function isDeadlock(error: unknown): boolean {
+  return isPostgresError(error, DEADLOCK_DETECTED);
+}
+
+/**
+ * True when the write failed because another booking got there first, by either
+ * mechanism the database uses to say so.
+ *
+ * Callers care about "lost the race, try again", not about which of the two
+ * SQLSTATEs reported it -- so the distinction is resolved here rather than
+ * duplicated at every retry site.
+ */
+export function isLostRace(error: unknown): boolean {
+  return isExclusionViolation(error) || isDeadlock(error);
 }
 
 /**

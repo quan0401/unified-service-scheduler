@@ -12,6 +12,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { AppointmentsService } from './appointments.service';
+import { readPositiveInt } from '../../common/env';
 import {
   CreateAppointmentDto,
   CreateHoldDto,
@@ -52,7 +53,7 @@ export class AppointmentsController {
   /** Reserves a slot briefly so it cannot be taken while the customer completes booking. */
   @Post('holds')
   async hold(@Body() body: CreateHoldDto) {
-    const ttl = Number(process.env.HOLD_TTL_SECONDS ?? DEFAULT_HOLD_TTL_SECONDS);
+    const ttl = readPositiveInt('HOLD_TTL_SECONDS', DEFAULT_HOLD_TTL_SECONDS);
     const outcome = await this.appointments.hold(
       {
         dealershipId: body.dealershipId,

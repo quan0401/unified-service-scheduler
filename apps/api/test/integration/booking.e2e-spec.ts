@@ -207,6 +207,47 @@ describe('booking API', () => {
       expect(await testDb.appointment.count()).toBe(1);
     });
 
+    /**
+     * A hold reserves scarce capacity, so confirming someone else's is a way to
+     * take a slot you never queued for. The refusal names the hold rather than
+     * the vehicle: the vehicle may be perfectly legitimate, and a client told
+     * "this vehicle is not yours" would go looking in the wrong place.
+     */
+    it('refuses to confirm a hold placed by a different customer', async () => {
+      const hold = await post('/holds', bookingBody()).expect(201);
+
+      const intruder = await testDb.customer.create({
+        data: { name: 'Someone Else', email: `intruder-${Date.now()}@example.com` },
+      });
+      const theirVehicle = await testDb.vehicle.create({
+        data: {
+          customerId: intruder.id,
+          vin: `VIN${String(Date.now()).slice(-14)}`,
+          make: 'Volvo',
+          model: 'V60',
+          year: 2024,
+        },
+      });
+
+      const response = await post(
+        '/appointments',
+        bookingBody({
+          holdId: hold.body.data.id,
+          customerId: intruder.id,
+          vehicleId: theirVehicle.id,
+        }),
+      ).expect(403);
+
+      expect(response.body.error.code).toBe('HOLD_NOT_OWNED');
+
+      // The hold must survive the attempt -- an intruder should not be able to
+      // knock out a reservation merely by trying to claim it.
+      const untouched = await testDb.appointment.findUniqueOrThrow({
+        where: { id: hold.body.data.id },
+      });
+      expect(untouched.status).toBe('HELD');
+    });
+
     it('refuses to confirm a hold that has expired', async () => {
       const hold = await post('/holds', bookingBody()).expect(201);
       const holdId = hold.body.data.id;
