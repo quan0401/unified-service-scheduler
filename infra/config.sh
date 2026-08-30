@@ -17,7 +17,18 @@ GITHUB_REPO="unified-service-scheduler"
 # x86_64, because the images are built by GitHub Actions on ubuntu-latest.
 # Changing this to arm64 means changing the AMI parameter and the workflow's
 # build platform together -- they are one decision, not two.
-INSTANCE_TYPE="t3a.small"
+#
+# t3.small rather than the marginally cheaper t3a.small, which this account
+# cannot launch at all:
+#
+#   InvalidParameterCombination: The specified instance type is not eligible
+#   for Free Tier.
+#
+# The account is on the AWS Free Plan, which restricts it to free-tier-eligible
+# types. In ap-southeast-1 those are t3.micro, t3.small, t4g.micro, t4g.small,
+# c7i-flex.large, and m7i-flex.large -- t3a is not among them. t3.small is the
+# same 2 vCPU / 2 GiB as t3a.small and consumes identical linux/amd64 images.
+INSTANCE_TYPE="t3.small"
 INSTANCE_ARCH="amd64"
 ROOT_VOLUME_GB=20
 
