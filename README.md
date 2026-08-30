@@ -8,15 +8,6 @@ Scenario A (Ownership). Backend implemented; the client layer is stubbed with an
 OpenAPI document, a cURL walkthrough, and a REST Client file, as the brief
 allows.
 
-| Artifact                   | Where                                                                                                                                          |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| System Design Document     | [`DESIGN.md`](DESIGN.md)                                                                                                                       |
-| API contract               | [`apps/api/docs/openapi.json`](apps/api/docs/openapi.json), Swagger UI at `/docs`                                                              |
-| Client stub / test harness | [`apps/api/docs/curl-walkthrough.md`](apps/api/docs/curl-walkthrough.md), [`apps/api/docs/booking-flow.http`](apps/api/docs/booking-flow.http) |
-| AI collaboration narrative | [§ below](#ai-collaboration-narrative) · raw log: [`docs/ai-collaboration-log.md`](docs/ai-collaboration-log.md)                               |
-
----
-
 ## The problem in one paragraph
 
 The brief's second requirement — _"before confirming, check for the availability
@@ -27,6 +18,20 @@ checking closes that window, because only the database sees both writes. So the
 guarantee lives in **PostgreSQL GiST exclusion constraints**, which make an
 overlapping row impossible to write, and the application's job is to lose that
 race rarely and cleanly. Full reasoning in [`DESIGN.md`](DESIGN.md).
+
+The claim is tested, not asserted: **107 tests**, including a
+[concurrency suite](#test) that fires 200 simultaneous bookings at one slot
+against real PostgreSQL and asserts a single row survives.
+
+---
+
+| Artifact                   | Where                                                                                                                                                                                                       |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| System Design Document     | [`DESIGN.md`](DESIGN.md) · [assumptions](DESIGN.md#assumptions)                                                                                                                                             |
+| API contract               | [`apps/api/docs/openapi.json`](apps/api/docs/openapi.json), Swagger UI at `/docs`                                                                                                                           |
+| Client stub / test harness | [`apps/api/docs/curl-walkthrough.md`](apps/api/docs/curl-walkthrough.md), [`apps/api/docs/booking-flow.http`](apps/api/docs/booking-flow.http)                                                              |
+| AI collaboration narrative | [§ below](#ai-collaboration-narrative) · raw log: [`docs/ai-collaboration-log.md`](docs/ai-collaboration-log.md)                                                                                            |
+| Running instance           | <https://18.138.188.0/> — a deployment to click. The concurrency _proof_ is the test suite, not the browser demo; see [the caveats](apps/web/README.md#what-the-concurrency-screen-does-and-does-not-prove) |
 
 ---
 
