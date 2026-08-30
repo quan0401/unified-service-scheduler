@@ -45,6 +45,45 @@ background jobs, Turborepo, `@scheduler/contracts`, and `apps/web` are elective,
 added where they demonstrate an assessment dimension. `README.md` carries the
 table; nothing elective is load-bearing for the three requirements.
 
+### Assumptions
+
+The brief leaves parts of the domain deliberately underspecified. These are the
+readings this implementation commits to; each one is enforced somewhere in code,
+not merely intended.
+
+- **The caller says what it wants, never who does it.** A request names the
+  dealership, customer, vehicle, service type, and desired start. It cannot name
+  a technician or a bay — assignment is the system's job, and letting a client
+  choose would reintroduce the check-then-act race this design exists to remove.
+- **Duration comes from the service type.** `endAt` is computed once from
+  `ServiceType.durationMinutes` and stored, so re-pricing a service later never
+  retroactively moves bookings that already exist.
+- **Any qualified, available resource will do.** A technician is eligible when
+  they are `active`, hold the `technician_skill` row for the service, and have a
+  shift covering the service's _whole_ duration rather than merely its start. A
+  bay is eligible when it is `active` and holds the `bay_capability` row.
+  Between eligible candidates there is no preference to express — see the
+  `ORDER BY random()` discussion in §4.
+- **Resources never cross dealerships.** Every candidate query is filtered by
+  `dealership_id`.
+- **Three things cannot be in two places at once:** the technician, the bay, and
+  the vehicle. Each has its own exclusion constraint over `HELD` and `CONFIRMED`
+  rows. `CANCELLED` and `COMPLETED` do not occupy, so cancelling frees the slot.
+- **Back-to-back is allowed.** Intervals are half-open `[start, end)`, so a job
+  ending at 10:00 and one starting at 10:00 do not overlap.
+- **A hold occupies only while it is alive.** A `HELD` row blocks competitors
+  until `hold_expires_at` passes; after that the booking path treats it as free
+  without waiting for the sweeper. TTL is `HOLD_TTL_SECONDS`, default 120s.
+- **Availability is a read, never a reservation.** It answers "what looked free
+  a moment ago" and is explicitly not a claim on a slot — §6.
+- **Cancellation is a status change, not a delete.** History is retained.
+- **Time is stored as UTC instants.** Every timestamp is `timestamptz`;
+  `Dealership.timezone` drives slot generation and display only.
+- **Authentication is out of scope,** so the customer id is read from the
+  request body. The ownership rules the domain _implies_ are still enforced
+  server-side — a vehicle must belong to the customer, and a hold can only be
+  confirmed by its owner. §8 states the consequences of the missing auth layer.
+
 ---
 
 ## 2. Architecture
@@ -118,7 +157,7 @@ that makes the common case fast; none of it is trusted to be sufficient.
 | **Throttler**                  | Per-IP rate limiting, two windows (burst + sustained)                | Cheap abuse protection. Per-IP rather than per-customer only because there is no auth — named as a limitation in §8                                                                                                                                                                         |
 | **Zod validation**             | Rejects malformed requests before any handler runs                   | One schema yields the runtime validator, the TypeScript type, _and_ the OpenAPI document, so the three cannot drift                                                                                                                                                                         |
 | **Availability**               | Generates candidate slots, marks each free or busy                   | Split in two: a **pure function** for slot shape, one query for occupancy. Advisory by design — never a reservation                                                                                                                                                                         |
-| **Booking repository**         | The atomic claim statement                                           | Selection and insertion in **one** statement, so there is no window between finding a free bay and taking it                                                                                                                                                                                |
+| **Booking repository**         | The atomic claim statement                                           | Selection and insertion in **one** statement, so no application-level gap sits between finding a free bay and taking it. Concurrent statements can still choose the same candidate under MVCC — the constraint settles that, and the loser retries                                          |
 | **Appointments service**       | Domain rules, retry policy, idempotency                              | Holds no locks and opens no long transactions; mutual exclusion is delegated entirely to the database                                                                                                                                                                                       |
 | **Exception filter**           | Maps domain errors to HTTP status codes                              | A single exit point means no driver message or stack trace can escape into a response                                                                                                                                                                                                       |
 | **Hold sweeper**               | Deletes lapsed reservations                                          | Housekeeping, _not_ correctness — see §5. Uncoordinated across replicas by design: the delete is idempotent                                                                                                                                                                                 |
@@ -312,6 +351,18 @@ The cross join yields exactly one row when both CTEs found a resource and zero
 rows when either did not — so "nothing available" costs no extra query. The
 `NOT EXISTS` probes ride the GiST indexes the constraints already create, so no
 additional index is needed.
+
+**What one statement does and does not close.** It removes the application-level
+gap — the network round trip and the handler code that used to sit between
+reading "free" and writing the booking. It does not remove the database-level
+one. Each statement takes its own snapshot under `READ COMMITTED`, so two
+concurrent bookers can both see the same technician free and both attempt the
+insert; the second blocks on the exclusion constraint's index entry and raises
+`23P01` when the first commits. That is the design working rather than failing.
+The statement narrows the window to something rare, and the constraint settles
+whatever is left — which is why the constraint is the authority here and the
+statement is an optimisation. §11 measures the split: 200 concurrent bookers
+produced **two** genuine constraint conflicts, not 199.
 
 **`ORDER BY random()` is deliberate.** `ORDER BY least_loaded` is the obvious
 choice and is actively harmful under concurrency: every in-flight request
