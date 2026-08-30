@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    name: typecheck, build, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      # Ephemeral database, created and destroyed with this job. These values
+      # define the throwaway account rather than unlocking an existing one --
+      # they are configuration, not credentials, and are deliberately literal
+      # so a fork can run CI without configuring repository secrets.
+      #
+      # postgres:16-alpine ships contrib, so the btree_gist extension the
+      # exclusion-constraint migration requires is available. Without it those
+      # constraints are never created and every concurrency assertion passes
+      # vacuously.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: scheduler
+          POSTGRES_PASSWORD: scheduler
+          # Named scheduler_test because test/global-setup.ts refuses to run
+          # against a URL that does not match /scheduler_test/ -- a guard against
+          # pointing the destructive suite at a real database.
+          POSTGRES_DB: scheduler_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U scheduler"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Both point at the same database. test/support/app.ts rebinds
+      # DATABASE_URL to TEST_DATABASE_URL before importing AppModule anyway;
+      # setting both keeps any direct DATABASE_URL read off a development URL.
+      DATABASE_URL: postgresql://scheduler:scheduler@localhost:5432/scheduler_test?schema=public
+      TEST_DATABASE_URL: postgresql://scheduler:scheduler@localhost:5432/scheduler_test?schema=public
+      NODE_ENV: test
+      LOG_LEVEL: silent
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reads the packageManager field in package.json, so the pnpm version
+      # here can never drift from the one the lockfile was written with.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Prisma client types are a prerequisite for `tsc --noEmit`. Turbo's
+      # typecheck task depends only on ^build, which builds contracts, not the
+      # generated client -- so generation has to be explicit and come first.
+      - name: Generate Prisma client
+        run: pnpm --filter @scheduler/api db:generate
+
+      - run: pnpm typecheck
+
+      - run: pnpm build
+
+      - name: Unit tests
+        run: pnpm test
+
+      # globalSetup applies both migrations to TEST_DATABASE_URL, so the GiST
+      # exclusion constraints exist before anything asserts on them. This step
+      # covers test/integration/** and the 200-way race in test/concurrency/**.
+      - name: Integration and concurrency tests
+        run: pnpm test:integration
