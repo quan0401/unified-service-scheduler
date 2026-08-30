@@ -20,4 +20,6 @@ export type DomainErrorCode =
   | 'SLOT_UNAVAILABLE'
   | 'SLOT_CONTENDED'
   | 'APPOINTMENT_NOT_CANCELLABLE'
-  | 'VALIDATION_FAILED';
+  | 'VALIDATION_FAILED'
+  /** The server is at capacity, not the slot. Transient; the same request may succeed later. */
+  | 'SERVICE_OVERLOADED';

@@ -39,7 +39,13 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://scheduler:${POSTGRES_PASSWORD}@postgres:5432/scheduler?schema=public
+      # connection_limit is set explicitly because Prisma's default is derived
+      # from the CPU count it detects inside the container -- which came out as
+      # 3 here, and the concurrency demo fires twenty simultaneous bookings.
+      # A pool that small turns a load demo into pool-timeout errors that say
+      # nothing about the booking logic being exercised. Postgres allows 100
+      # connections by default and this is the only client.
+      DATABASE_URL: postgresql://scheduler:${POSTGRES_PASSWORD}@postgres:5432/scheduler?schema=public&connection_limit=25&pool_timeout=20
       PORT: '3000'
       LOG_LEVEL: info
       # Same-origin through nginx, so no preflight is issued and this is

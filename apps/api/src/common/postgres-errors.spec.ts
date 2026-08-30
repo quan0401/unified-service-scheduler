@@ -8,6 +8,7 @@
  */
 import {
   isContentionTimeout,
+  isPoolTimeout,
   isDeadlock,
   isExclusionViolation,
   isLostRace,
@@ -99,6 +100,35 @@ describe('postgres error classification', () => {
       expect(isContentionTimeout(null)).toBe(false);
       expect(isContentionTimeout(undefined)).toBe(false);
       expect(isContentionTimeout('57014')).toBe(false);
+    });
+  });
+
+  describe('isPoolTimeout', () => {
+    // P2024 is raised by Prisma itself, client-side, so it carries no SQLSTATE:
+    // the query never reached PostgreSQL at all.
+    const poolError = {
+      code: 'P2024',
+      meta: { connection_limit: 3, timeout: 10 },
+      message: 'Timed out fetching a new connection from the connection pool.',
+    };
+
+    it('recognises P2024', () => {
+      expect(isPoolTimeout(poolError)).toBe(true);
+    });
+
+    it('is not confused with a contention timeout', () => {
+      expect(isContentionTimeout(poolError)).toBe(false);
+      expect(isLostRace(poolError)).toBe(false);
+    });
+
+    it('does not fire on the SQLSTATE-carrying errors', () => {
+      expect(isPoolTimeout(rawError('57014'))).toBe(false);
+      expect(isPoolTimeout(rawError('23P01'))).toBe(false);
+    });
+
+    it('ignores values that are not errors', () => {
+      expect(isPoolTimeout(null)).toBe(false);
+      expect(isPoolTimeout('P2024')).toBe(false);
     });
   });
 

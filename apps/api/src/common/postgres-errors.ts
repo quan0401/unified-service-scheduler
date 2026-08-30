@@ -114,6 +114,31 @@ export function isLostRace(error: unknown): boolean {
 }
 
 /**
+ * Prisma's code for exhausting the client connection pool.
+ *
+ * Not a SQLSTATE -- the query never reached PostgreSQL, so there is nothing for
+ * the database to report. Prisma raises it from the client side after
+ * `pool_timeout` elapses with every connection busy.
+ */
+export const POOL_TIMEOUT = 'P2024';
+
+/**
+ * True when the request never got a database connection.
+ *
+ * Distinct from every SQLSTATE case here: those mean the database considered
+ * the write and refused it, whereas this means the write was never attempted.
+ * The slot may well be free. Reporting it as contention would be a lie that
+ * hides a capacity problem behind an ordinary-looking 409.
+ */
+export function isPoolTimeout(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === POOL_TIMEOUT
+  );
+}
+
+/**
  * True when the database gave up waiting rather than resolving the conflict.
  *
  * Distinct from `isLostRace` in the one way that matters to a caller: a lost

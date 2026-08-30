@@ -13,6 +13,7 @@ import { BookingRepository, APPOINTMENT_DETAIL } from './booking.repository';
 import {
   isContentionTimeout,
   isLostRace,
+  isPoolTimeout,
   isUniqueViolation,
 } from '../../common/postgres-errors';
 import {
@@ -20,6 +21,7 @@ import {
   HoldNotOwnedError,
   NotFoundError,
   OutsideOpeningHoursError,
+  ServiceOverloadedError,
   SlotContendedError,
   SlotUnavailableError,
   VehicleNotOwnedError,
@@ -159,6 +161,17 @@ export class AppointmentsService {
         if (isUniqueViolation(error) && request.idempotencyKey) {
           const winner = await this.bookings.findByIdempotencyKey(request.idempotencyKey);
           if (winner) return { appointment: winner, replayed: true, attempts };
+        }
+
+        // Never got a connection, so the slot was never even examined.
+        // Retrying immediately would consume another pool slot and make the
+        // queue worse, so this reports capacity and stops.
+        if (isPoolTimeout(error)) {
+          this.logger.warn(
+            `Booking attempt ${attempts}/${MAX_BOOKING_ATTEMPTS} could not obtain a ` +
+              `database connection; the pool is saturated`,
+          );
+          throw new ServiceOverloadedError();
         }
 
         // Waited out the lock or statement budget rather than losing outright.
