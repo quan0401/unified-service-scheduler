@@ -23,6 +23,21 @@ IMAGE_TAG="${IMAGE_TAG:-$(git rev-parse HEAD)}"
 API_IMAGE="${ECR_REGISTRY}/${ECR_API_REPO}:${IMAGE_TAG}"
 WEB_IMAGE="${ECR_REGISTRY}/${ECR_WEB_REPO}:${IMAGE_TAG}"
 
+# First boot bakes docker-compose.prod.yml into user-data, but update.sh fetches
+# it from raw.githubusercontent.com at the deployed commit. Those two agree only
+# if the tree is clean and the commit is pushed -- otherwise the first redeploy
+# silently swaps in a different config than the one provisioned here.
+if [ -n "$(git status --porcelain -- "$(dirname "$0")")" ]; then
+  echo "WARNING: infra/ has uncommitted changes." >&2
+  echo "         The instance will boot with your working copy, but update.sh" >&2
+  echo "         fetches infra/docker-compose.prod.yml from ${IMAGE_TAG:0:12}," >&2
+  echo "         so the first redeploy would revert them." >&2
+fi
+if ! git merge-base --is-ancestor "$IMAGE_TAG" "origin/main" 2>/dev/null; then
+  echo "WARNING: ${IMAGE_TAG:0:12} is not on origin/main." >&2
+  echo "         update.sh will not be able to fetch the compose file for it." >&2
+fi
+
 log "Checking images exist in ECR (tag ${IMAGE_TAG:0:12})"
 for repo in "$ECR_API_REPO" "$ECR_WEB_REPO"; do
   if ! aws ecr describe-images --repository-name "$repo" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
@@ -108,6 +123,10 @@ if [ "$INSTANCE_ID" = "None" ] || [ -z "$INSTANCE_ID" ]; then
   USER_DATA=$(mktemp)
   sed -e "s|__AWS_REGION__|${AWS_DEFAULT_REGION}|g" \
       -e "s|__ECR_REGISTRY__|${ECR_REGISTRY}|g" \
+      -e "s|__ECR_API_REPO__|${ECR_API_REPO}|g" \
+      -e "s|__ECR_WEB_REPO__|${ECR_WEB_REPO}|g" \
+      -e "s|__GITHUB_OWNER__|${GITHUB_OWNER}|g" \
+      -e "s|__GITHUB_REPO__|${GITHUB_REPO}|g" \
       -e "s|__API_IMAGE__|${API_IMAGE}|g" \
       -e "s|__WEB_IMAGE__|${WEB_IMAGE}|g" \
       -e "s|__CORS_ORIGIN__|${APP_URL}|g" \

@@ -90,19 +90,117 @@ fi
 
 # --- Redeploy helper ----------------------------------------------------------
 #
-# Invoked later via SSM Run Command so a new image does not require rebuilding
+# Invoked later via SSM Run Command so a new build does not require rebuilding
 # the instance. Kept here rather than in deploy.sh because it must exist on the
 # box, not on the operator's laptop.
+#
+# A redeploy has to move two things together, which is what the first version of
+# this script got wrong. The image tags in .env are immutable commit SHAs, so
+# `docker compose pull` on its own re-fetches a tag that is already local and
+# changes nothing; and any setting that lives in docker-compose.yml rather than
+# in the image is not an image change at all. So this fetches the compose file
+# from the same commit the images were built from, which keeps the two in step
+# by construction. The repository is public, so no credential is involved.
 cat > "$APP_DIR/update.sh" <<'UPDATE'
 #!/bin/bash
-set -euxo pipefail
-cd /opt/scheduler
-REGION=$(cloud-init query region 2>/dev/null || echo "__AWS_REGION__")
-REGISTRY=$(grep -oP '(?<=^API_IMAGE=)[^/]+' .env)
+#
+# Redeploy onto a different build.
+#
+#   update.sh              deploy whatever commit currently carries `latest`
+#   update.sh <commit-sha> deploy one specific commit
+#
+# Only commits that reached main have images, because the CI publish job is
+# gated on the test job -- so a SHA that resolves here is a SHA whose tests
+# passed. Refuses to touch anything until both images and the compose file for
+# that commit are confirmed to exist, and rolls back if the result is unhealthy.
+set -euo pipefail
+
+APP_DIR=/opt/scheduler
+REGION="__AWS_REGION__"
+REGISTRY="__ECR_REGISTRY__"
+API_REPO="__ECR_API_REPO__"
+WEB_REPO="__ECR_WEB_REPO__"
+RAW_BASE="https://raw.githubusercontent.com/__GITHUB_OWNER__/__GITHUB_REPO__"
+
+cd "$APP_DIR"
+log() { echo "[update] $*"; }
+
+# --- Resolve the target commit ------------------------------------------------
+# `latest` and the commit SHA are two tags on one manifest, so with no argument
+# the SHA can be read back out of the registry rather than passed in.
+SHA="${1:-}"
+if [ -z "$SHA" ]; then
+  SHA=$(aws ecr describe-images --region "$REGION" --repository-name "$API_REPO" \
+          --image-ids imageTag=latest --query 'imageDetails[0].imageTags' --output text 2>/dev/null \
+        | tr '\t' '\n' | grep -E '^[0-9a-f]{40}$' | head -1 || true)
+fi
+if ! echo "$SHA" | grep -qE '^[0-9a-f]{40}$'; then
+  log "could not resolve a commit SHA to deploy (got '${SHA:-<empty>}')"
+  exit 1
+fi
+log "target commit $SHA"
+
+# --- Refuse to start unless everything for that commit exists -----------------
+for repo in "$API_REPO" "$WEB_REPO"; do
+  if ! aws ecr describe-images --region "$REGION" --repository-name "$repo" \
+         --image-ids imageTag="$SHA" >/dev/null 2>&1; then
+    log "$repo has no image tagged $SHA"
+    exit 1
+  fi
+done
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+if ! curl -fsSL --retry 3 --retry-delay 2 \
+       "$RAW_BASE/$SHA/infra/docker-compose.prod.yml" -o "$TMP/docker-compose.yml"; then
+  log "could not fetch infra/docker-compose.prod.yml at $SHA"
+  exit 1
+fi
+
+# The password and CORS origin belong to the instance, not to the build, so the
+# existing .env is edited rather than regenerated.
+cp .env "$TMP/.env"
+sed -i -E "s#^(API_IMAGE=.*/${API_REPO}):.*#\1:${SHA}#" "$TMP/.env"
+sed -i -E "s#^(WEB_IMAGE=.*/${WEB_REPO}):.*#\1:${SHA}#" "$TMP/.env"
+
+# Catches a malformed file or an unset variable before it can take the site down.
+if ! docker compose -f "$TMP/docker-compose.yml" --env-file "$TMP/.env" config -q; then
+  log "compose file at $SHA is not valid with this .env"
+  exit 1
+fi
+
+# --- Roll ---------------------------------------------------------------------
+BACKUP="$APP_DIR/.rollback"
+rm -rf "$BACKUP" && mkdir -p "$BACKUP"
+cp docker-compose.yml .env "$BACKUP/"
+
+install -m 644 "$TMP/docker-compose.yml" "$APP_DIR/docker-compose.yml"
+install -m 600 "$TMP/.env" "$APP_DIR/.env"
+
 aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY"
 docker compose pull
 docker compose up -d --remove-orphans
+
+# --- Health gate --------------------------------------------------------------
+ready() {
+  docker compose exec -T api node -e \
+    "fetch('http://localhost:3000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" \
+    >/dev/null 2>&1
+}
+for _ in $(seq 1 30); do ready && break; sleep 5; done
+
+if ! ready; then
+  log "$SHA did not become ready; rolling back"
+  install -m 644 "$BACKUP/docker-compose.yml" "$APP_DIR/docker-compose.yml"
+  install -m 600 "$BACKUP/.env" "$APP_DIR/.env"
+  docker compose up -d --remove-orphans
+  log "rolled back"
+  exit 1
+fi
+
 docker image prune -f
+log "deployed $SHA"
 UPDATE
 chmod +x "$APP_DIR/update.sh"
 
