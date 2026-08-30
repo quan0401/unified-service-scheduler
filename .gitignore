@@ -7,6 +7,7 @@ dist/
 build/
 .turbo/
 coverage/
+*.tsbuildinfo
 
 # Environment — never commit; see .env.example for the required keys
 .env
