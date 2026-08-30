@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.turbo/
+coverage/
+
+# Environment — never commit; see .env.example for the required keys
+.env
+.env.local
+.env.*.local
+
+# Secrets and key material. This repository is public: a committed key is
+# published permanently, including to forks and code-search indexes.
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+
+# The assessment brief belongs to the hiring company, not to this project.
+# Kept local so publishing this repo does not expose their material.
+purpose.txt
+
+# Personal preparation material, not project deliverables.
+# VIDEO.md is a speaking script for the submission recording.
+VIDEO.md
+.claude/
+
+# Misc
+*.log
+.DS_Store
