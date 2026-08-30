@@ -36,7 +36,7 @@ Scope came from re-reading the brief, not from the model.
 **Proposed.** `SELECT ... FOR UPDATE` on the technician and bay rows inside the
 booking transaction, with a database constraint as a backstop.
 
-**Challenged.** A row lock locks the *resource*, not the *time slot*. Booking a
+**Challenged.** A row lock locks the _resource_, not the _time slot_. Booking a
 technician at 09:00 would block an unrelated 15:00 booking for the same
 technician — two bookings that can never conflict. At a busy dealership this
 collapses into a hot-row queue, so the design would have been correct and slow,
@@ -76,7 +76,7 @@ behaviour has to be reasoned about explicitly; it is not visible in the code.
 
 **Decision.** The exclusion constraints were written, applied, and then tested
 directly through Prisma — inserting genuinely overlapping rows and asserting
-SQLSTATE `23P01` — *before* any service code existed.
+SQLSTATE `23P01` — _before_ any service code existed.
 
 **Why.** Every later test trusts that an overlapping row cannot be written. Had
 the migration silently not applied, the whole suite would have passed vacuously
@@ -122,7 +122,7 @@ PostgreSQL.
 
 **Reality.** The Docker daemon was not running on the build machine. Rather than
 assume, the environment was checked directly: PostgreSQL 16.10 present,
-`btree_gist` 1.7 available, superuser access confirmed — *before* committing to
+`btree_gist` 1.7 available, superuser access confirmed — _before_ committing to
 a design that depends on an extension.
 
 **Resolved.** Tests target a dedicated `scheduler_test` database.
@@ -146,12 +146,12 @@ ordinary test.
 **Caught.** Two daylight-saving tests failed — a 23-hour spring-forward day
 produced 24 slots and a 25-hour fall-back day produced 24 instead of 25.
 
-**Root cause.** Opening hours are *wall-clock* times ("we close at 18:00 local"),
+**Root cause.** Opening hours are _wall-clock_ times ("we close at 18:00 local"),
 not elapsed durations. The two coincide on all 363 ordinary days a year and
 diverge on the two that matter. As written, the dealership would have opened an
 hour late every spring and the last bookable hour would have vanished.
 
-**Fixed.** Open and close resolve as wall-clock instants; slot *stepping* stays
+**Fixed.** Open and close resolve as wall-clock instants; slot _stepping_ stays
 elapsed time, because an appointment occupies real duration — a 60-minute
 service is 60 real minutes even if the local clock jumps during it. Both
 semantics are now stated in comments, since the distinction is invisible in the
@@ -226,7 +226,7 @@ bookable and rejects every booking, until the background sweeper happens to run.
 
 **Why it was intermittent.** The failing test used a scenario with two
 technicians and two bays. `ORDER BY random()` routed most attempts to the
-*other* pair, which succeeded. The bug only surfaced when the random pick landed
+_other_ pair, which succeeded. The bug only surfaced when the random pick landed
 on the resource the stale hold occupied.
 
 **Fix.** On a constraint conflict, booking now reclaims lapsed holds overlapping
@@ -240,7 +240,7 @@ against the old code instead of roughly one run in four.
 
 **Lesson.** Two lessons, and the second is the larger one. First: an
 intermittent failure is a bug report, not noise. Second: the randomisation
-introduced to *reduce* contention also masked this defect, because it routed
+introduced to _reduce_ contention also masked this defect, because it routed
 around the broken resource. A performance optimisation quietly weakened the
 test suite's ability to detect a correctness bug — worth knowing about any
 system that makes non-deterministic choices.
@@ -270,7 +270,7 @@ plus a Next.js web shell. It looked thorough. On examination it was not:
 **What made it visible.** Asking what each package would cost versus what it
 would prevent. Set against the cost — Prisma generation across a package
 boundary, TypeScript build ordering, Jest resolution, and the invalidation of
-four documents whose numbers were currently *measured and correct* — most of
+four documents whose numbers were currently _measured and correct_ — most of
 them prevented nothing.
 
 There was also an internal inconsistency worth naming. `DESIGN.md` argues that
@@ -279,7 +279,7 @@ for the workload. Wrapping one service in five packages is the same failure with
 the opposite sign: structure that signals rigour without doing work.
 
 **Revised.** One package. `@scheduler/contracts` earns its place because the
-brief has the client *stubbed*, so contract drift is a live risk with no
+brief has the client _stubbed_, so contract drift is a live risk with no
 mechanism to catch it. Everything else stayed where it was.
 
 **Lesson.** The AI's structural instinct is additive — asked for a monorepo, it
@@ -311,12 +311,81 @@ fixed once in this project, when tests were included in the build tsconfig.
 constraints:
 
 - **tsc / nest build** resolves through the pnpm workspace symlink to the
-  package's *built output*. `contracts` is a composite package with `main` and
+  package's _built output_. `contracts` is a composite package with `main` and
   `types`; `turbo.json` declares `dependsOn: ["^build"]` so ordering is enforced
   rather than assumed.
 - **Jest** has no `rootDir` constraint, so its `moduleNameMapper` points at
-  package *source*. Tests therefore cannot pass against a stale `dist/`.
+  package _source_. Tests therefore cannot pass against a stale `dist/`.
 
 **Lesson.** "It resolves in the editor" is not evidence that it builds. The
 build was run and `dist/main.js` checked for its actual path, rather than
 trusting that the import worked.
+
+---
+
+## 12. A claim in the design document that the code did not support
+
+**Context.** §9 of `DESIGN.md` asserted the system was "correct and horizontally
+scalable as-is: the API is stateless, so all coordination lives in PostgreSQL."
+That was checked rather than assumed, and it was false — not for the booking
+path, where the exclusion constraints genuinely do hold at any replica count,
+but for the background jobs. Both crons run in _every_ replica, and the relay
+selected its batch with an uncoordinated poll:
+
+```ts
+const pending = await this.prisma.outboxEvent.findMany({
+  where: { publishedAt: null },
+  orderBy: { createdAt: 'asc' },
+  take: RELAY_BATCH_SIZE,
+});
+```
+
+N replicas select the same rows and all N dispatch them.
+
+**The measurement, not the argument.** A test seeding 250 pending events across
+four concurrent relays reported **400 dispatches covering only 100 distinct
+events** — the batch limit, claimed four times over, with the remaining 150
+events untouched. Duplication _and_ under-coverage, which the reasoning above
+had not predicted. The test was written first and confirmed failing before any
+fix, so it is a regression test rather than a description of work already done.
+
+**The suggestion that was wrong, and how it was caught.** The first proposal was
+a PostgreSQL advisory lock in both jobs — leader election. Checking it against
+published outbox implementations instead of accepting it changed the answer
+twice:
+
+- **Against the relay fix.** An advisory lock removes duplicates by
+  _serialising_: one replica relays, the rest idle every tick, and throughput
+  stays at 1× no matter how many replicas run. `FOR UPDATE SKIP LOCKED` removes
+  them by _partitioning_ — each relay claims a disjoint batch and throughput
+  rises with replica count. Same defect fixed; opposite scaling behaviour.
+- **Against a fix that was nearly over-built.** One source flags holding a
+  cursor across a broker call as an anti-pattern, which argues for a
+  `claimed_until` lease column. But that advice is scoped to _slow_ side
+  effects; `dispatch()` here is an in-process `logger.log`. A lease would have
+  added a stuck-row problem that holding the transaction does not have — a
+  crashed relay simply rolls back and its rows reappear. The deciding factor is
+  dispatch latency, so that criterion went into the comment instead of the
+  column into the schema.
+
+**What was deliberately not changed.** The hold sweeper was examined and left
+alone. Its `deleteMany` is a single idempotent statement: concurrent replicas
+serialise on row locks and the losers delete nothing. A leader lock there would
+have added a failure mode — leader dies, sweeping stops — to fix a bug that does
+not exist. That reasoning is now a comment in the file, because the next reader
+will otherwise see an uncoordinated cron and "fix" it.
+
+**An unrelated defect found on the way.** The relay's supporting index was
+`("published_at", "created_at")` over every row. Published events are never
+deleted, so it grew without bound while the rows it usefully served stayed near
+zero. Replaced with a partial index over unpublished rows only — the same
+reasoning the sweeper already exists to serve for the exclusion constraints.
+Measured on 50,000 published plus 200 pending events: **1552 kB → 16 kB**, with
+`EXPLAIN` confirming the planner uses it and touches three index buffers.
+
+**Lesson.** The design document was the most confident artifact in the
+repository and the one containing the error, because prose asserts a property
+where code merely has one. The useful move was treating a documentation claim as
+a testable proposition. The second lesson is narrower: the model's first fix was
+plausible, conventional, and would have quietly capped a scaling property the
+same document was advertising.

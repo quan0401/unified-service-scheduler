@@ -113,8 +113,8 @@ that makes the common case fast; none of it is trusted to be sufficient.
 | **Booking repository**         | The atomic claim statement                                           | Selection and insertion in **one** statement, so there is no window between finding a free bay and taking it                                                              |
 | **Appointments service**       | Domain rules, retry policy, idempotency                              | Holds no locks and opens no long transactions; mutual exclusion is delegated entirely to the database                                                                     |
 | **Exception filter**           | Maps domain errors to HTTP status codes                              | A single exit point means no driver message or stack trace can escape into a response                                                                                     |
-| **Hold sweeper**               | Deletes lapsed reservations                                          | Housekeeping, _not_ correctness — see §5                                                                                                                                  |
-| **Outbox relay**               | Publishes confirmation events                                        | Keeps all network I/O off the booking path                                                                                                                                |
+| **Hold sweeper**               | Deletes lapsed reservations                                          | Housekeeping, _not_ correctness — see §5. Uncoordinated across replicas by design: the delete is idempotent                                                               |
+| **Outbox relay**               | Publishes confirmation events                                        | Keeps all network I/O off the booking path. Claims batches with `FOR UPDATE SKIP LOCKED`, so replicas partition work rather than duplicate it                             |
 | **PostgreSQL**                 | Source of truth **and** the concurrency arbiter                      | The only component that sees both racing writes, so the only one that can adjudicate                                                                                      |
 
 ### Code organization
@@ -508,15 +508,29 @@ make the outage worse.
 - **Availability is uncached.** Correct but unnecessarily expensive at scale —
   see §9.
 - **The outbox relay is at-least-once.** Consumers must be idempotent;
-  `aggregateId` + `eventType` is the natural deduplication key.
+  `aggregateId` + `eventType` is the natural deduplication key. Duplicates come
+  from genuine retries only — not from the number of replicas running, which is
+  what an uncoordinated poll would have caused.
+- **Event ordering is rough FIFO, not global.** Relays claim disjoint batches
+  and finish independently, so a consumer needing per-aggregate ordering must
+  impose it itself. Ordering was never promised, but a single-replica relay
+  would have appeared to provide it.
 
 ---
 
 ## 9. Scaling — documented, not built
 
 The current design is correct and horizontally scalable as-is: the API is
-stateless, so all coordination lives in PostgreSQL. These are the next steps, in
-the order the load would demand them.
+stateless, so all coordination lives in PostgreSQL. That holds for the two
+background jobs as well, which is worth stating because it is where a stateless
+API most often stops being one — every replica runs both crons. The relay claims
+its batch with `FOR UPDATE SKIP LOCKED`, so concurrent relays take disjoint rows
+and throughput rises with replica count instead of being serialised behind an
+elected leader; a relay that dies mid-batch rolls back and its rows become
+immediately visible to the others, so there is no lease to expire and no
+stuck-row reaper to run. The sweeper needs no coordination at all: its delete is
+idempotent, so concurrent sweeps cost a redundant query and nothing else. These
+are the next steps, in the order the load would demand them.
 
 **Read/write asymmetry is the defining characteristic.** Availability reads
 outnumber bookings by roughly 100:1 — every customer browses, few book. Scale
@@ -599,16 +613,17 @@ backed by something that was run, not something that was asserted.
 
 ## 11. Verification
 
-| Layer                     | Count | What it proves                                                                                                                        |
-| ------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| **Unit** (no database)    | 23    | Slot generation across DST transitions, closed days, closing-time overrun, foreign timezones, input validation, configuration parsing |
-| **Constraint proof**      | 12    | The database rejects overlaps — asserted _before_ any service code existed, so nothing downstream trusts an unverified guarantee      |
-| **Booking rules**         | 21    | Booking, refusals with precise codes, holds, hold ownership, idempotency, cancellation, reads                                         |
-| **Availability**          | 10    | Occupancy reflects qualification, capability, shift coverage, and existing bookings                                                   |
-| **Catalog, health, jobs** | 14    | Reference data, probes, metrics format, hold sweeper, and outbox atomicity — a forced outbox failure must roll the appointment back   |
-| **Concurrency**           | 5     | The decisive tests — see below                                                                                                        |
+| Layer                     | Count | What it proves                                                                                                                         |
+| ------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Unit** (no database)    | 23    | Slot generation across DST transitions, closed days, closing-time overrun, foreign timezones, input validation, configuration parsing  |
+| **Constraint proof**      | 12    | The database rejects overlaps — asserted _before_ any service code existed, so nothing downstream trusts an unverified guarantee       |
+| **Booking rules**         | 21    | Booking, refusals with precise codes, holds, hold ownership, idempotency, cancellation, reads                                          |
+| **Availability**          | 10    | Occupancy reflects qualification, capability, shift coverage, and existing bookings                                                    |
+| **Catalog, health, jobs** | 15    | Reference data, probes, metrics format, hold sweeper, and outbox atomicity — a forced outbox failure must roll the appointment back    |
+| **Outbox relay**          | 5     | Concurrent relays dispatch each event exactly once — the test fails against an uncoordinated poll, which duplicates _and_ under-covers |
+| **Concurrency**           | 5     | The decisive tests — see below                                                                                                         |
 
-**Coverage: 93.0% statements, 94.2% lines, 97.0% functions** (85 tests).
+**Coverage: 93.6% statements, 94.8% lines, 97.1% functions** (91 tests).
 
 The decisive test fires **200 simultaneous bookings at one slot backed by one
 bay** and asserts exactly one `201`, 199 `409`, and exactly one row in the
