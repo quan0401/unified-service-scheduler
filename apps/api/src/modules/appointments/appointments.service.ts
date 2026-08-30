@@ -291,10 +291,16 @@ export class AppointmentsService {
     ]);
 
     if (!dealership) {
-      throw new NotFoundError('DEALERSHIP_NOT_FOUND', `No dealership with id ${request.dealershipId}.`);
+      throw new NotFoundError(
+        'DEALERSHIP_NOT_FOUND',
+        `No dealership with id ${request.dealershipId}.`,
+      );
     }
     if (!serviceType) {
-      throw new NotFoundError('SERVICE_TYPE_NOT_FOUND', `No service type with id ${request.serviceTypeId}.`);
+      throw new NotFoundError(
+        'SERVICE_TYPE_NOT_FOUND',
+        `No service type with id ${request.serviceTypeId}.`,
+      );
     }
     if (!vehicle) {
       throw new NotFoundError('VEHICLE_NOT_FOUND', `No vehicle with id ${request.vehicleId}.`);
@@ -331,7 +337,6 @@ export class AppointmentsService {
     }
     return appointment;
   }
-
 }
 
 /** Recovers the attempt count a SlotContendedError recorded in its details. */

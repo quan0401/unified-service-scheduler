@@ -36,7 +36,11 @@ export function loggingConfig(): Params {
 
       // Never log credentials or client identifiers verbatim.
       redact: {
-        paths: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["idempotency-key"]'],
+        paths: [
+          'req.headers.authorization',
+          'req.headers.cookie',
+          'req.headers["idempotency-key"]',
+        ],
         remove: true,
       },
 

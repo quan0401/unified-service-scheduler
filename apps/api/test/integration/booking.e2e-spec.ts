@@ -33,8 +33,7 @@ describe('booking API', () => {
     scenario = await createScenario({ ...UTC, technicianCount: 2, bayCount: 2, vehicleCount: 2 });
   });
 
-  const post = (path: string, body: object) =>
-    request(app.getHttpServer()).post(path).send(body);
+  const post = (path: string, body: object) => request(app.getHttpServer()).post(path).send(body);
 
   const bookingBody = (overrides: Record<string, unknown> = {}) => ({
     dealershipId: scenario.dealershipId,

@@ -32,9 +32,7 @@ export function readPositiveInt(name: string, fallback: number): number {
 
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    logger.warn(
-      `${name}="${raw}" is not a positive whole number. Falling back to ${fallback}.`,
-    );
+    logger.warn(`${name}="${raw}" is not a positive whole number. Falling back to ${fallback}.`);
     return fallback;
   }
 

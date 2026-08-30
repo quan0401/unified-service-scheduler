@@ -9,10 +9,7 @@ import { generateSlots } from './slot-generator';
 const OPEN_9_TO_17 = { openMinute: 9 * 60, closeMinute: 17 * 60 };
 
 /** Renders slot starts as local wall-clock times, which is how a human reads a diary. */
-function localStarts(
-  slots: { startAt: Date }[],
-  timeZone: string,
-): string[] {
+function localStarts(slots: { startAt: Date }[], timeZone: string): string[] {
   return slots.map((slot) =>
     new Intl.DateTimeFormat('en-GB', {
       timeZone,
@@ -37,7 +34,14 @@ describe('generateSlots', () => {
       // 09:00 through 16:00 -- the 17:00 start is excluded because a 60-minute
       // service would finish after closing.
       expect(localStarts(slots, 'Europe/London')).toEqual([
-        '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00',
+        '09:00',
+        '10:00',
+        '11:00',
+        '12:00',
+        '13:00',
+        '14:00',
+        '15:00',
+        '16:00',
       ]);
     });
 

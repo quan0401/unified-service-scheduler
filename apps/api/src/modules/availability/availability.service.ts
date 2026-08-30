@@ -46,7 +46,10 @@ export class AvailabilityService {
       throw new NotFoundError('DEALERSHIP_NOT_FOUND', `No dealership with id ${dealershipId}.`);
     }
     if (!serviceType) {
-      throw new NotFoundError('SERVICE_TYPE_NOT_FOUND', `No service type with id ${serviceTypeId}.`);
+      throw new NotFoundError(
+        'SERVICE_TYPE_NOT_FOUND',
+        `No service type with id ${serviceTypeId}.`,
+      );
     }
 
     const slots = generateSlots({

@@ -13,11 +13,7 @@ import {
 } from '@nestjs/common';
 import { AppointmentsService } from './appointments.service';
 import { readPositiveInt } from '../../common/env';
-import {
-  CreateAppointmentDto,
-  CreateHoldDto,
-  ListAppointmentsDto,
-} from './appointments.dto';
+import { CreateAppointmentDto, CreateHoldDto, ListAppointmentsDto } from './appointments.dto';
 
 /** Default reservation lifetime: long enough to fill a form, short enough not to hoard slots. */
 const DEFAULT_HOLD_TTL_SECONDS = 120;

@@ -179,7 +179,5 @@ export function isWithinOpeningHours(
   if (!window) return false;
 
   const startMinute = local.hour * 60 + local.minute;
-  return (
-    startMinute >= window.openMinute && startMinute + durationMinutes <= window.closeMinute
-  );
+  return startMinute >= window.openMinute && startMinute + durationMinutes <= window.closeMinute;
 }

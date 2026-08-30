@@ -41,9 +41,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       const name = database[0]?.current_database;
       if (!name) return;
 
-      await this.$executeRawUnsafe(
-        `ALTER DATABASE "${name}" SET lock_timeout = ${lockTimeout}`,
-      );
+      await this.$executeRawUnsafe(`ALTER DATABASE "${name}" SET lock_timeout = ${lockTimeout}`);
       await this.$executeRawUnsafe(
         `ALTER DATABASE "${name}" SET statement_timeout = ${statementTimeout}`,
       );
