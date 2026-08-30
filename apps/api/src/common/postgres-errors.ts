@@ -37,6 +37,26 @@ export const UNIQUE_VIOLATION = '23505';
  */
 export const DEADLOCK_DETECTED = '40P01';
 
+/**
+ * lock_not_available -- `lock_timeout` elapsed while waiting on a competitor.
+ *
+ * Set deliberately (DB_LOCK_TIMEOUT_MS) so a contended booking fails fast
+ * instead of queueing. Without it the request would block for as long as the
+ * winner's transaction runs.
+ */
+export const LOCK_NOT_AVAILABLE = '55P03';
+
+/**
+ * query_canceled -- `statement_timeout` elapsed.
+ *
+ * On the booking statement this means the same thing as 55P03: the insert sat
+ * behind another backend's exclusion-constraint lock until the budget ran out.
+ * The code is more general than that in principle -- a genuinely slow query
+ * raises it too -- which is why only the booking path treats it as contention,
+ * and everything else still surfaces it as a fault.
+ */
+export const QUERY_CANCELED = '57014';
+
 interface PrismaLikeError {
   code?: unknown;
   meta?: { code?: unknown };
@@ -91,6 +111,25 @@ export function isDeadlock(error: unknown): boolean {
  */
 export function isLostRace(error: unknown): boolean {
   return isExclusionViolation(error) || isDeadlock(error);
+}
+
+/**
+ * True when the database gave up waiting rather than resolving the conflict.
+ *
+ * Distinct from `isLostRace` in the one way that matters to a caller: a lost
+ * race is worth retrying, because the resource we picked was taken but another
+ * may still be free. A timeout is not. The request has already spent its entire
+ * lock or statement budget queued behind the same holder, so a retry buys
+ * another full wait and returns the same answer later.
+ *
+ * Observed live: a 20-way race for one bay produced sixteen clean 409s and
+ * three HTTP 500s, the latter being these two SQLSTATEs falling through to the
+ * unhandled-exception path after 11, 16, and 21 seconds.
+ */
+export function isContentionTimeout(error: unknown): boolean {
+  return (
+    isPostgresError(error, LOCK_NOT_AVAILABLE) || isPostgresError(error, QUERY_CANCELED)
+  );
 }
 
 /**
