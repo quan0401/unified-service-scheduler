@@ -25,6 +25,14 @@ import { Injectable } from '@nestjs/common';
 import { AppointmentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
+/**
+ * `to_char` pattern matching JavaScript's `Date.toISOString()` byte for byte.
+ *
+ * Shared by both outbox writers so the two paths cannot drift into emitting
+ * different timestamp formats for the same kind of event.
+ */
+const ISO_8601_UTC = 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"';
+
 export interface BookingAttempt {
   dealershipId: string;
   customerId: string;
@@ -122,33 +130,84 @@ export class BookingRepository {
           )
         ORDER BY random()
         LIMIT 1
+      ),
+      booked AS (
+        INSERT INTO appointment (
+          id, dealership_id, customer_id, vehicle_id, service_type_id,
+          technician_id, service_bay_id, start_at, end_at, status,
+          hold_expires_at, idempotency_key, created_at, updated_at
+        )
+        -- The cross join yields exactly one row when both CTEs found a resource,
+        -- and zero rows when either did not -- so "nothing available" needs no
+        -- separate query and carries no extra round trip.
+        SELECT
+          gen_random_uuid(),
+          ${attempt.dealershipId}::uuid,
+          ${attempt.customerId}::uuid,
+          ${attempt.vehicleId}::uuid,
+          ${attempt.serviceTypeId}::uuid,
+          ft.id,
+          fb.id,
+          ${attempt.startAt},
+          ${attempt.endAt},
+          ${attempt.status}::"AppointmentStatus",
+          ${attempt.holdExpiresAt},
+          ${attempt.idempotencyKey},
+          now(),
+          now()
+        FROM free_technician ft, free_bay fb
+        RETURNING
+          id, customer_id, vehicle_id, technician_id, service_bay_id,
+          start_at, end_at, status, hold_expires_at
+      ),
+      -- The transactional outbox, written in the SAME STATEMENT as the
+      -- appointment -- which is what makes the claim true rather than merely
+      -- intended. A single statement is a single transaction, so the event and
+      -- the appointment commit together or not at all. A confirmation can never
+      -- be emitted for a booking that rolled back, and a booking can never
+      -- commit without its event.
+      --
+      -- Three things make this work, all documented behaviour of data-modifying
+      -- CTEs (PostgreSQL 16, §7.8.4):
+      --   1. Sub-statements share one snapshot and cannot see each other's
+      --      effects; RETURNING is the only sanctioned channel between them.
+      --      Reading "booked" below is therefore also what ORDERS the two
+      --      inserts -- without that data dependency their order is undefined.
+      --   2. A data-modifying CTE runs "exactly once, and always to completion,
+      --      independently of whether the primary query reads ... any of their
+      --      output". Nothing references "event", and it still executes.
+      --   3. Zero rows from "booked" yields zero rows here, so a failed claim
+      --      emits nothing without needing a conditional.
+      --
+      -- Rejected alternative: a second round trip inside an interactive
+      -- transaction. Correct, but it holds the appointment's exclusion-constraint
+      -- locks across a network hop, and a competing booker waits exactly as long
+      -- as those locks are held. See myDocs/outbox-atomicity-cte-vs-transaction.md.
+      event AS (
+        INSERT INTO outbox_event (id, event_type, aggregate_id, payload)
+        SELECT
+          gen_random_uuid(),
+          'appointment.confirmed',
+          b.id,
+          jsonb_build_object(
+            'appointmentId', b.id,
+            'customerId',    b.customer_id,
+            'vehicleId',     b.vehicle_id,
+            'technicianId',  b.technician_id,
+            'serviceBayId',  b.service_bay_id,
+            -- Reproduces Date.toISOString() exactly, so the payload wire format
+            -- is unchanged by the move from application code into SQL.
+            'startAt', to_char(b.start_at AT TIME ZONE 'UTC', ${ISO_8601_UTC}),
+            'endAt',   to_char(b.end_at   AT TIME ZONE 'UTC', ${ISO_8601_UTC})
+          )
+        FROM booked b
+        -- A hold is not a booking. Only a confirmation is announced, matching
+        -- the previous behaviour where the hold path never wrote an event.
+        WHERE b.status = 'CONFIRMED'
       )
-      INSERT INTO appointment (
-        id, dealership_id, customer_id, vehicle_id, service_type_id,
-        technician_id, service_bay_id, start_at, end_at, status,
-        hold_expires_at, idempotency_key, created_at, updated_at
-      )
-      -- The cross join yields exactly one row when both CTEs found a resource,
-      -- and zero rows when either did not -- so "nothing available" needs no
-      -- separate query and carries no extra round trip.
       SELECT
-        gen_random_uuid(),
-        ${attempt.dealershipId}::uuid,
-        ${attempt.customerId}::uuid,
-        ${attempt.vehicleId}::uuid,
-        ${attempt.serviceTypeId}::uuid,
-        ft.id,
-        fb.id,
-        ${attempt.startAt},
-        ${attempt.endAt},
-        ${attempt.status}::"AppointmentStatus",
-        ${attempt.holdExpiresAt},
-        ${attempt.idempotencyKey},
-        now(),
-        now()
-      FROM free_technician ft, free_bay fb
-      RETURNING
         id, technician_id, service_bay_id, start_at, end_at, status, hold_expires_at
+      FROM booked
     `;
 
     return rows[0] ?? null;
@@ -190,13 +249,40 @@ export class BookingRepository {
    */
   async confirmHold(holdId: string): Promise<BookedRow | null> {
     const rows = await this.prisma.$queryRaw<BookedRow[]>`
-      UPDATE appointment
-      SET status = 'CONFIRMED', hold_expires_at = NULL, updated_at = now()
-      WHERE id = ${holdId}::uuid
-        AND status = 'HELD'
-        AND hold_expires_at > now()
-      RETURNING
+      WITH confirmed AS (
+        UPDATE appointment
+        SET status = 'CONFIRMED', hold_expires_at = NULL, updated_at = now()
+        WHERE id = ${holdId}::uuid
+          AND status = 'HELD'
+          AND hold_expires_at > now()
+        RETURNING
+          id, customer_id, vehicle_id, technician_id, service_bay_id,
+          start_at, end_at, status, hold_expires_at
+      ),
+      -- Same statement, same reasoning as attempt(): promoting the hold and
+      -- announcing the confirmation commit together. A hold that failed to
+      -- promote (expired, or already gone) returns zero rows, so no event is
+      -- written -- no conditional required.
+      event AS (
+        INSERT INTO outbox_event (id, event_type, aggregate_id, payload)
+        SELECT
+          gen_random_uuid(),
+          'appointment.confirmed',
+          c.id,
+          jsonb_build_object(
+            'appointmentId', c.id,
+            'customerId',    c.customer_id,
+            'vehicleId',     c.vehicle_id,
+            'technicianId',  c.technician_id,
+            'serviceBayId',  c.service_bay_id,
+            'startAt', to_char(c.start_at AT TIME ZONE 'UTC', ${ISO_8601_UTC}),
+            'endAt',   to_char(c.end_at   AT TIME ZONE 'UTC', ${ISO_8601_UTC})
+          )
+        FROM confirmed c
+      )
+      SELECT
         id, technician_id, service_bay_id, start_at, end_at, status, hold_expires_at
+      FROM confirmed
     `;
 
     return rows[0] ?? null;

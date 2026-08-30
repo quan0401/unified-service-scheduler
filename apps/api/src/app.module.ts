@@ -12,6 +12,7 @@ import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { BackgroundJobsModule } from './modules/background-jobs/background-jobs.module';
 import { RequestContextMiddleware } from './common/request-context.middleware';
 import { loggingConfig } from './observability/logging.config';
+import { readPositiveInt } from './common/env';
 
 @Module({
   imports: [
@@ -33,12 +34,12 @@ import { loggingConfig } from './observability/logging.config';
       {
         name: 'burst',
         ttl: 1_000,
-        limit: Number(process.env.THROTTLE_BURST_LIMIT ?? 20),
+        limit: readPositiveInt('THROTTLE_BURST_LIMIT', 20),
       },
       {
         name: 'sustained',
         ttl: 60_000,
-        limit: Number(process.env.THROTTLE_SUSTAINED_LIMIT ?? 300),
+        limit: readPositiveInt('THROTTLE_SUSTAINED_LIMIT', 300),
       },
     ]),
 

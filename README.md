@@ -160,15 +160,16 @@ Turbo caches `build` and `test`. The database-backed tasks are declared
 file inputs, so a cached "pass" could report success for a suite that never ran
 against the current schema.
 
-**74 tests. 93.0% statements, 94.2% lines, 96.9% functions.**
+**85 tests. 93.0% statements, 94.2% lines, 97.0% functions.**
 
 | Suite | Tests | What it proves |
 |---|---|---|
 | `slot-generator.spec.ts` | 16 | DST transitions, closed days, closing-time overrun, foreign timezones |
+| `env.spec.ts` | 7 | Malformed configuration falls back instead of yielding `NaN` |
 | `exclusion-constraints.e2e-spec.ts` | 12 | The database rejects overlaps — written *before* any service code |
-| `booking.e2e-spec.ts` | 20 | Booking, refusals, holds, idempotency, cancellation |
+| `booking.e2e-spec.ts` | 21 | Booking, refusals, holds, ownership, idempotency, cancellation |
 | `availability.e2e-spec.ts` | 10 | Occupancy reflects skills, capabilities, shifts, bookings |
-| `catalog-and-jobs.e2e-spec.ts` | 11 | Reference data, health, metrics format, outbox, sweeper |
+| `catalog-and-jobs.e2e-spec.ts` | 14 | Reference data, health, metrics, sweeper, and **outbox atomicity** |
 | `booking-race.e2e-spec.ts` | 5 | **The decisive tests** |
 
 The decisive one fires **200 simultaneous bookings at a single slot backed by a
@@ -209,7 +210,7 @@ Every response shares one envelope:
 ```
 
 Errors carry a machine-readable code so clients branch without parsing prose:
-`VEHICLE_NOT_OWNED` (403), `OUTSIDE_OPENING_HOURS` (422), `SLOT_UNAVAILABLE`
+`VEHICLE_NOT_OWNED` (403), `HOLD_NOT_OWNED` (403), `OUTSIDE_OPENING_HOURS` (422), `SLOT_UNAVAILABLE`
 (409, genuinely full), `SLOT_CONTENDED` (409, lost every retry),
 `HOLD_EXPIRED` (409).
 
@@ -221,8 +222,10 @@ only signal separating "busy dealership" from "system fighting itself".
 There is none — the brief does not ask for it, and building a login system would
 spend effort outside the graded requirements. The one ownership rule the domain
 *implies* is enforced server-side: an appointment associates a customer and
-*their* vehicle, so booking someone else's car returns 403. A `@CurrentCustomer()`
-decorator marks where a real guard would attach.
+*their* vehicle, so booking someone else's car returns 403, and confirming
+someone else's reservation returns `HOLD_NOT_OWNED`. Both rules read the customer
+id straight off the request body — that is the single seam a real guard would
+replace, by resolving it from a verified token instead.
 
 Consequences, stated rather than hidden: the API is IDOR-able, and rate limiting
 is per-IP rather than per-customer.
@@ -366,7 +369,7 @@ produced.
 
 Every architectural decision here has a stated reason, and every reason is
 either mechanical (what the lock locks, what the constraint predicate can
-evaluate) or measured (74 tests, 258 ms for 200 concurrent bookings, a verified
+evaluate) or measured (85 tests, 258 ms for 200 concurrent bookings, a verified
 status distribution). Where a decision has a cost — Prisma with PgBouncer
 disabling prepared statements, no authentication, at-least-once event delivery —
 it is named in `DESIGN.md` rather than left for a reader to discover.

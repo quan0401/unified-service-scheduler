@@ -87,7 +87,7 @@ graph TB
     CAT --> TBL
     REPO --> EXC
     EXC --> TBL
-    BK -.same transaction.-> OBX
+    BK -.same statement.-> OBX
     REL --> OBX
     SW --> TBL
     BK --> FILT
@@ -313,14 +313,14 @@ sequenceDiagram
 
     loop up to 3 attempts
         A->>P: atomic claim statement
+        Note over A,P: selects resources, inserts the appointment,<br/>and writes the outbox event — ONE statement,<br/>therefore one transaction
         alt one row returned
-            P-->>A: appointment
-            A->>P: outbox event (same transaction)
+            P-->>A: appointment (event already durable)
             A-->>C: 201 Created
         else zero rows
             P-->>A: no free resources
             A-->>C: 409 SLOT_UNAVAILABLE
-        else 23P01 exclusion violation
+        else 23P01 exclusion violation / 40P01 deadlock
             P-->>A: lost the race
             A->>P: reclaim lapsed holds in range
             A->>A: jittered backoff
@@ -473,8 +473,10 @@ make the outage worse.
 - **No authentication.** The brief does not ask for it, and adding a login
   system would spend effort outside the graded requirements. But the one
   ownership rule the domain *implies* is enforced: an appointment associates a
-  customer and *their* vehicle, so `VehicleNotOwnedError` is checked server-side.
-  A `@CurrentCustomer()` decorator marks the swap point for a real guard.
+  customer and *their* vehicle, so `VehicleNotOwnedError` is checked server-side,
+  and `HoldNotOwnedError` stops one customer confirming another's reservation.
+  Both read the customer id from the request body — the one seam a real guard
+  would replace, by resolving it from a verified token instead.
   Consequence: the API is IDOR-able, and rate limiting is per-IP rather than
   per-customer, so one abusive client behind a shared NAT consumes the budget
   for everyone behind it.
@@ -574,14 +576,14 @@ backed by something that was run, not something that was asserted.
 
 | Layer | Count | What it proves |
 |---|---|---|
-| **Unit** (no database) | 16 | Slot generation across DST transitions, closed days, closing-time overrun, foreign timezones, input validation |
+| **Unit** (no database) | 23 | Slot generation across DST transitions, closed days, closing-time overrun, foreign timezones, input validation, configuration parsing |
 | **Constraint proof** | 12 | The database rejects overlaps — asserted *before* any service code existed, so nothing downstream trusts an unverified guarantee |
-| **Booking rules** | 20 | Booking, refusals with precise codes, holds, idempotency, cancellation, reads |
+| **Booking rules** | 21 | Booking, refusals with precise codes, holds, hold ownership, idempotency, cancellation, reads |
 | **Availability** | 10 | Occupancy reflects qualification, capability, shift coverage, and existing bookings |
-| **Catalog, health, jobs** | 11 | Reference data, probes, metrics format, outbox relay, hold sweeper |
+| **Catalog, health, jobs** | 14 | Reference data, probes, metrics format, hold sweeper, and outbox atomicity — a forced outbox failure must roll the appointment back |
 | **Concurrency** | 5 | The decisive tests — see below |
 
-**Coverage: 93.0% statements, 94.2% lines, 96.9% functions** (74 tests).
+**Coverage: 93.0% statements, 94.2% lines, 97.0% functions** (85 tests).
 
 The decisive test fires **200 simultaneous bookings at one slot backed by one
 bay** and asserts exactly one `201`, 199 `409`, and exactly one row in the

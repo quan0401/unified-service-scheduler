@@ -92,6 +92,12 @@ describe('concurrent booking of a single slot', () => {
     // The database is the real assertion: whatever the API reported, there must
     // be exactly one live booking for that bay and time.
     expect(await testDb.appointment.count({ where: { status: 'CONFIRMED' } })).toBe(1);
+
+    // One confirmation per confirmed booking, under the heaviest contention the
+    // suite produces. Because the event is written by the same statement as the
+    // appointment, this count cannot drift -- a mismatch either way would mean
+    // the atomicity claim had quietly broken.
+    expect(await testDb.outboxEvent.count()).toBe(1);
   });
 
   it('fills every bay exactly once when capacity is greater than one', async () => {
@@ -116,6 +122,9 @@ describe('concurrent booking of a single slot', () => {
     // by resource rather than merely limiting the total.
     const appointments = await testDb.appointment.findMany({ select: { serviceBayId: true } });
     expect(new Set(appointments.map((a) => a.serviceBayId)).size).toBe(capacity);
+
+    // Every winner announced exactly once -- no lost and no duplicated events.
+    expect(await testDb.outboxEvent.count()).toBe(capacity);
   });
 
   it('is limited by technicians when they are the scarce resource', async () => {

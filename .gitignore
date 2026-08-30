@@ -31,9 +31,12 @@ purpose.txt
 
 # Personal preparation material, not project deliverables.
 # VIDEO.md is a speaking script for the submission recording.
+# myDocs/ holds working notes and trade-off analyses written while building.
 VIDEO.md
+myDocs/
 .claude/
 
 # Misc
 *.log
 .DS_Store
+KeyloopCodingChallange.pdf

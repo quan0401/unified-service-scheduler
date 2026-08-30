@@ -9,10 +9,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AppointmentStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { BookingRepository, APPOINTMENT_DETAIL, type BookedRow } from './booking.repository';
-import { isExclusionViolation, isUniqueViolation } from '../../common/postgres-errors';
+import { BookingRepository, APPOINTMENT_DETAIL } from './booking.repository';
+import { isLostRace, isUniqueViolation } from '../../common/postgres-errors';
 import {
   HoldExpiredError,
+  HoldNotOwnedError,
   NotFoundError,
   OutsideOpeningHoursError,
   SlotContendedError,
@@ -131,7 +132,8 @@ export class AppointmentsService {
         // That is a settled answer, not a race, so retrying cannot help.
         if (!row) throw new SlotUnavailableError({ startAt: request.startAt.toISOString() });
 
-        await this.recordBooked(row, request);
+        // No outbox write here: the confirmation event was written by the same
+        // statement that created the appointment. See BookingRepository.attempt.
         return { appointment: await this.requireById(row.id), replayed: false, attempts };
       } catch (error) {
         // Two requests raced with the same idempotency key: the loser reads the
@@ -141,7 +143,7 @@ export class AppointmentsService {
           if (winner) return { appointment: winner, replayed: true, attempts };
         }
 
-        if (!isExclusionViolation(error)) throw error;
+        if (!isLostRace(error)) throw error;
 
         // Lost the race. The resource we picked was claimed between our read
         // and our insert; another may still be free, so try again.
@@ -190,7 +192,7 @@ export class AppointmentsService {
         if (!row) throw new SlotUnavailableError({ startAt: request.startAt.toISOString() });
         return { appointment: await this.requireById(row.id), replayed: false, attempts };
       } catch (error) {
-        if (!isExclusionViolation(error)) throw error;
+        if (!isLostRace(error)) throw error;
         this.metrics.recordConflict();
         if (attempts >= MAX_BOOKING_ATTEMPTS) break;
         await this.bookings.reclaimExpiredHolds(request.startAt, endAt);
@@ -214,7 +216,7 @@ export class AppointmentsService {
     const hold = await this.bookings.findById(holdId);
     if (!hold) throw new NotFoundError('HOLD_NOT_FOUND', `No reservation with id ${holdId}.`);
     if (hold.customerId !== request.customerId) {
-      throw new VehicleNotOwnedError(hold.vehicleId, request.customerId);
+      throw new HoldNotOwnedError(holdId, request.customerId);
     }
     if (hold.status === AppointmentStatus.CONFIRMED) {
       return { appointment: hold, replayed: true, attempts: 0 };
@@ -230,7 +232,8 @@ export class AppointmentsService {
       });
     }
 
-    await this.recordBooked(confirmed, request);
+    // As with a direct booking, the confirmation event was written by the same
+    // statement that promoted the hold. See BookingRepository.confirmHold.
     return { appointment: await this.requireById(holdId), replayed: false, attempts: 1 };
   }
 
@@ -329,30 +332,6 @@ export class AppointmentsService {
     return appointment;
   }
 
-  /**
-   * Emits the confirmation event through the outbox.
-   *
-   * Written as a plain row rather than dispatched inline so no network call
-   * happens on the booking path -- keeping transactions short is what keeps the
-   * conflict window small.
-   */
-  private async recordBooked(row: BookedRow, request: BookingRequest): Promise<void> {
-    await this.prisma.outboxEvent.create({
-      data: {
-        eventType: 'appointment.confirmed',
-        aggregateId: row.id,
-        payload: {
-          appointmentId: row.id,
-          customerId: request.customerId,
-          vehicleId: request.vehicleId,
-          technicianId: row.technician_id,
-          serviceBayId: row.service_bay_id,
-          startAt: row.start_at.toISOString(),
-          endAt: row.end_at.toISOString(),
-        },
-      },
-    });
-  }
 }
 
 /** Recovers the attempt count a SlotContendedError recorded in its details. */

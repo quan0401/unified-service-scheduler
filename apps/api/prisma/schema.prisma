@@ -203,9 +203,11 @@ model Appointment {
   @@map("appointment")
 }
 
-// Transactional outbox. Rows are written in the same transaction as the
-// appointment, so a confirmation can never be emitted for a rolled-back booking
-// and no external I/O ever runs inside the booking transaction.
+// Transactional outbox. Rows are written by the same STATEMENT as the
+// appointment -- a chained data-modifying CTE, so the event and the booking
+// share one transaction without one ever being opened explicitly. A
+// confirmation can never be emitted for a rolled-back booking, a booking can
+// never commit without its event, and no external I/O runs on the booking path.
 model OutboxEvent {
   id            String    @id @default(uuid()) @db.Uuid
   eventType     String    @map("event_type")

@@ -112,7 +112,7 @@ describe('catalog, health, and background jobs', () => {
         })
         .expect(201);
 
-      // Written in the same transaction as the appointment, so it exists
+      // Written by the same statement as the appointment, so it exists
       // immediately and unpublished.
       expect(await testDb.outboxEvent.count({ where: { publishedAt: null } })).toBe(1);
 
@@ -122,6 +122,117 @@ describe('catalog, health, and background jobs', () => {
       const event = await testDb.outboxEvent.findFirstOrThrow();
       expect(event.eventType).toBe('appointment.confirmed');
       expect(event.attemptCount).toBe(1);
+    });
+
+    /**
+     * The payload is assembled by `jsonb_build_object` in SQL, where TypeScript
+     * cannot check it. Asserting the fields here is what replaces the type
+     * safety given up in exchange for atomicity -- without this, renaming a key
+     * would break every consumer and no test would notice.
+     */
+    it('carries the associations a consumer needs, in the documented format', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/appointments')
+        .send({
+          dealershipId: scenario.dealershipId,
+          customerId: scenario.customerId,
+          vehicleId: scenario.vehicleIds[0],
+          serviceTypeId: scenario.serviceTypeId,
+          startAt: MONDAY_9AM,
+        })
+        .expect(201);
+
+      const appointment = response.body.data;
+      const event = await testDb.outboxEvent.findFirstOrThrow();
+
+      expect(event.aggregateId).toBe(appointment.id);
+      expect(event.payload).toEqual({
+        appointmentId: appointment.id,
+        customerId: scenario.customerId,
+        vehicleId: scenario.vehicleIds[0],
+        technicianId: appointment.technician.id,
+        serviceBayId: appointment.serviceBay.id,
+        startAt: appointment.startAt,
+        endAt: appointment.endAt,
+      });
+
+      // The SQL to_char pattern must reproduce Date.toISOString() exactly, or
+      // consumers parsing the timestamp see a format change they never agreed to.
+      expect(event.payload).toMatchObject({ startAt: MONDAY_9AM });
+    });
+
+    /**
+     * The property the outbox pattern exists to provide, asserted directly.
+     *
+     * A confirmation must never be emitted for a booking that did not commit,
+     * and a booking must never commit without its confirmation. Forcing the
+     * outbox insert to fail is the only way to observe which of those two
+     * things the code actually guarantees.
+     *
+     * Against the previous implementation -- two separate statements -- this
+     * test fails: the appointment survives its orphaned event.
+     */
+    it('rolls the appointment back when the outbox write fails', async () => {
+      await testDb.$executeRawUnsafe(
+        `ALTER TABLE "outbox_event" ADD CONSTRAINT "outbox_event_force_failure" CHECK (false)`,
+      );
+
+      try {
+        await request(app.getHttpServer())
+          .post('/appointments')
+          .send({
+            dealershipId: scenario.dealershipId,
+            customerId: scenario.customerId,
+            vehicleId: scenario.vehicleIds[0],
+            serviceTypeId: scenario.serviceTypeId,
+            startAt: MONDAY_9AM,
+          })
+          .expect(500);
+
+        // Both must be zero. An appointment here would be a booking the customer
+        // was never told about; an event would describe a booking that does not exist.
+        expect(await testDb.appointment.count()).toBe(0);
+        expect(await testDb.outboxEvent.count()).toBe(0);
+      } finally {
+        await testDb.$executeRawUnsafe(
+          `ALTER TABLE "outbox_event" DROP CONSTRAINT "outbox_event_force_failure"`,
+        );
+      }
+    });
+
+    /** The same guarantee on the hold-promotion path, which uses its own statement. */
+    it('leaves a hold unpromoted when its confirmation event cannot be written', async () => {
+      const body = {
+        dealershipId: scenario.dealershipId,
+        customerId: scenario.customerId,
+        vehicleId: scenario.vehicleIds[0],
+        serviceTypeId: scenario.serviceTypeId,
+        startAt: MONDAY_9AM,
+      };
+
+      const hold = await request(app.getHttpServer()).post('/holds').send(body).expect(201);
+      const holdId = hold.body.data.id;
+
+      await testDb.$executeRawUnsafe(
+        `ALTER TABLE "outbox_event" ADD CONSTRAINT "outbox_event_force_failure" CHECK (false)`,
+      );
+
+      try {
+        await request(app.getHttpServer())
+          .post('/appointments')
+          .send({ ...body, holdId })
+          .expect(500);
+
+        // Still HELD: a customer whose confirmation could not be recorded must
+        // not be told the appointment is booked.
+        const after = await testDb.appointment.findUniqueOrThrow({ where: { id: holdId } });
+        expect(after.status).toBe(AppointmentStatus.HELD);
+        expect(await testDb.outboxEvent.count()).toBe(0);
+      } finally {
+        await testDb.$executeRawUnsafe(
+          `ALTER TABLE "outbox_event" DROP CONSTRAINT "outbox_event_force_failure"`,
+        );
+      }
     });
 
     it('does nothing when there is no backlog', async () => {

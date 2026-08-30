@@ -5,9 +5,10 @@
  * Two reasons, both load-bearing:
  *
  *   1. Correctness -- an email sent inside a transaction that later rolls back
- *      tells the customer about an appointment that does not exist. Writing the
- *      intent as a row in the same transaction makes the event and the
- *      appointment atomic: either both exist or neither does.
+ *      tells the customer about an appointment that does not exist. The intent
+ *      is written as a row by the same STATEMENT that creates the appointment
+ *      (see BookingRepository), which makes the two atomic: either both exist
+ *      or neither does.
  *   2. Contention -- any network call inside the booking transaction extends
  *      the window during which the slot is locked from milliseconds to
  *      hundreds. Keeping transactions short is what keeps the conflict rate low.

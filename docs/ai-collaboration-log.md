@@ -21,7 +21,8 @@ resource contention only.
 
 **Resolved.** No auth. But Requirements 1 and 3 do imply the vehicle belongs to
 the requesting customer, so that single rule is enforced in the service layer,
-with a `@CurrentCustomer()` seam documented as the swap point for a real guard.
+reading the customer id from the request body — the single seam a real guard
+would replace by resolving it from a verified token instead.
 The two resulting gaps (IDOR-able API, per-IP rather than per-customer
 throttling) are named explicitly in the README rather than left implicit.
 
