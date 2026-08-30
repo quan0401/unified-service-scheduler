@@ -11,6 +11,8 @@ coverage/
 
 # Docker bind-mounted database files. State, not source.
 .data/
+# Database files, if infra/docker-compose.prod.yml is ever run locally.
+infra/data/
 
 # Environment — never commit; see .env.example for the required keys
 .env
