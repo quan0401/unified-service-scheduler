@@ -22,6 +22,11 @@ export class CatalogController {
     return this.catalog.listServiceTypes();
   }
 
+  @Get('customers')
+  listCustomers() {
+    return this.catalog.listCustomers();
+  }
+
   @Get('customers/:customerId/vehicles')
   listVehicles(@Param('customerId', ParseUUIDPipe) customerId: string) {
     return this.catalog.listVehicles(customerId);

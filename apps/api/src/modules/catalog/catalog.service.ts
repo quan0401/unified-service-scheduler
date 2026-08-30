@@ -28,6 +28,16 @@ export class CatalogService {
     });
   }
 
+  // Exposed so a client can offer a customer picker. Without it the only way to
+  // discover a customer id is the seed script's stdout, since ids are generated
+  // fresh on every seed rather than fixed.
+  listCustomers() {
+    return this.prisma.customer.findMany({
+      select: { id: true, name: true, email: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
   async listVehicles(customerId: string) {
     // Verified explicitly so an unknown customer is a 404 rather than an empty
     // list, which would otherwise be indistinguishable from "owns no vehicles".

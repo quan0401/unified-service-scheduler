@@ -8,20 +8,20 @@ Scenario A (Ownership). Backend implemented; the client layer is stubbed with an
 OpenAPI document, a cURL walkthrough, and a REST Client file, as the brief
 allows.
 
-| Artifact | Where |
-|---|---|
-| System Design Document | [`DESIGN.md`](DESIGN.md) |
-| API contract | [`apps/api/docs/openapi.json`](apps/api/docs/openapi.json), Swagger UI at `/docs` |
+| Artifact                   | Where                                                                                                                                          |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| System Design Document     | [`DESIGN.md`](DESIGN.md)                                                                                                                       |
+| API contract               | [`apps/api/docs/openapi.json`](apps/api/docs/openapi.json), Swagger UI at `/docs`                                                              |
 | Client stub / test harness | [`apps/api/docs/curl-walkthrough.md`](apps/api/docs/curl-walkthrough.md), [`apps/api/docs/booking-flow.http`](apps/api/docs/booking-flow.http) |
-| AI collaboration narrative | [§ below](#ai-collaboration-narrative) · raw log: [`docs/ai-collaboration-log.md`](docs/ai-collaboration-log.md) |
+| AI collaboration narrative | [§ below](#ai-collaboration-narrative) · raw log: [`docs/ai-collaboration-log.md`](docs/ai-collaboration-log.md)                               |
 
 ---
 
 ## The problem in one paragraph
 
-The brief's second requirement — *"before confirming, check for the availability
+The brief's second requirement — _"before confirming, check for the availability
 of both a ServiceBay and a qualified Technician for the entire service
-duration"* — is a check-then-act race. Two requests both read "Ramp A is free at
+duration"_ — is a check-then-act race. Two requests both read "Ramp A is free at
 09:00", both pass their check, and both insert. No amount of application-level
 checking closes that window, because only the database sees both writes. So the
 guarantee lives in **PostgreSQL GiST exclusion constraints**, which make an
@@ -53,6 +53,9 @@ A pnpm workspace driven by Turborepo. Two packages, and the split is narrow on
 purpose:
 
 ```text
+apps/web/              the Vite + React demo client
+  src/api/             fetch wrapper, envelope unwrap, typed errors
+  src/features/        booking · appointments · concurrency
 apps/api/              the NestJS modular monolith
   src/modules/         appointments · availability · catalog · background-jobs
   src/common/          envelope, exception filter, request context, errors
@@ -63,7 +66,7 @@ apps/api/              the NestJS modular monolith
 packages/contracts/    request schemas, response types, error codes
 ```
 
-`@scheduler/contracts` exists because the brief has the client *stubbed* rather
+`@scheduler/contracts` exists because the brief has the client _stubbed_ rather
 than built, and a stub that restates the request shape in its own words drifts
 from the server silently. Sharing one Zod declaration makes that drift a
 compile error. It exports plain Zod and depends only on `zod` — no NestJS, no
@@ -162,15 +165,15 @@ against the current schema.
 
 **85 tests. 93.0% statements, 94.2% lines, 97.0% functions.**
 
-| Suite | Tests | What it proves |
-|---|---|---|
-| `slot-generator.spec.ts` | 16 | DST transitions, closed days, closing-time overrun, foreign timezones |
-| `env.spec.ts` | 7 | Malformed configuration falls back instead of yielding `NaN` |
-| `exclusion-constraints.e2e-spec.ts` | 12 | The database rejects overlaps — written *before* any service code |
-| `booking.e2e-spec.ts` | 21 | Booking, refusals, holds, ownership, idempotency, cancellation |
-| `availability.e2e-spec.ts` | 10 | Occupancy reflects skills, capabilities, shifts, bookings |
-| `catalog-and-jobs.e2e-spec.ts` | 14 | Reference data, health, metrics, sweeper, and **outbox atomicity** |
-| `booking-race.e2e-spec.ts` | 5 | **The decisive tests** |
+| Suite                               | Tests | What it proves                                                        |
+| ----------------------------------- | ----- | --------------------------------------------------------------------- |
+| `slot-generator.spec.ts`            | 16    | DST transitions, closed days, closing-time overrun, foreign timezones |
+| `env.spec.ts`                       | 7     | Malformed configuration falls back instead of yielding `NaN`          |
+| `exclusion-constraints.e2e-spec.ts` | 12    | The database rejects overlaps — written _before_ any service code     |
+| `booking.e2e-spec.ts`               | 21    | Booking, refusals, holds, ownership, idempotency, cancellation        |
+| `availability.e2e-spec.ts`          | 10    | Occupancy reflects skills, capabilities, shifts, bookings             |
+| `catalog-and-jobs.e2e-spec.ts`      | 14    | Reference data, health, metrics, sweeper, and **outbox atomicity**    |
+| `booking-race.e2e-spec.ts`          | 5     | **The decisive tests**                                                |
 
 The decisive one fires **200 simultaneous bookings at a single slot backed by a
 single bay** and asserts exactly one `201`, 199 `409`, and exactly one row in
@@ -187,21 +190,57 @@ executed and its output verified.
 
 ---
 
+## The demo client
+
+The brief allows the unchosen layer to be stubbed, and it is — the OpenAPI
+document and the cURL walkthrough remain the contract. `apps/web` is a small
+React client added on top so the guarantee can be _seen_ rather than described.
+
+```bash
+pnpm dev        # API and UI together
+                # UI on http://localhost:5173
+```
+
+Three screens. **Book** walks the requirement path — availability, hold, confirm
+— and shows technician and bay counts per slot, so an unavailable slot says
+_which_ resource ran out. **Appointments** lists, looks up and cancels.
+**Concurrency** fires N simultaneous bookings at one slot and buckets the
+outcomes, which turns the cURL loop in §8 of the walkthrough into something
+visible.
+
+Two caveats that the screen states itself rather than hiding: browsers cap
+concurrent connections per origin at roughly six, so requests leave in waves;
+and the per-IP rate limiter produces 429s that are bucketed separately from
+booking conflicts, because collapsing them would overstate the result. The
+authoritative concurrency proof is still
+`apps/api/test/concurrency/booking-race.e2e-spec.ts`, at 200 requests with
+database-level assertions.
+
+The client imports `@scheduler/contracts` for its types and validates the
+booking form with `createHoldSchema` before submitting — the same declaration
+the server validates against, which is the reason that package was extracted.
+
+Its runtime dependencies are React, Vite and the contracts package; there is no
+date library, router, state library or CSS framework. See
+[`apps/web/README.md`](apps/web/README.md) for the reasoning and for the test
+strategy.
+
 ## API
 
-| Method | Path | Notes |
-|---|---|---|
-| `GET` | `/dealerships` | With timezone and opening hours |
-| `GET` | `/service-types` | With durations |
-| `GET` | `/customers/:id/vehicles` | 404 for unknown customer, not an empty list |
-| `GET` | `/availability` | Slot grid. **Advisory** — booking re-checks atomically |
-| `POST` | `/holds` | Reserve a slot for 2 minutes |
-| `POST` | `/appointments` | Confirm. Accepts `holdId` and `Idempotency-Key` |
-| `GET` | `/appointments/:id` | Confirmation record |
-| `GET` | `/appointments?customerId=` | List |
-| `DELETE` | `/appointments/:id` | Cancel; frees the slot, keeps the record |
-| `GET` | `/health`, `/health/ready` | Liveness, readiness |
-| `GET` | `/metrics` | Prometheus |
+| Method   | Path                        | Notes                                                           |
+| -------- | --------------------------- | --------------------------------------------------------------- |
+| `GET`    | `/dealerships`              | With timezone and opening hours                                 |
+| `GET`    | `/service-types`            | With durations                                                  |
+| `GET`    | `/customers`                | For a client to offer a customer picker; seed ids are not fixed |
+| `GET`    | `/customers/:id/vehicles`   | 404 for unknown customer, not an empty list                     |
+| `GET`    | `/availability`             | Slot grid. **Advisory** — booking re-checks atomically          |
+| `POST`   | `/holds`                    | Reserve a slot for 2 minutes                                    |
+| `POST`   | `/appointments`             | Confirm. Accepts `holdId` and `Idempotency-Key`                 |
+| `GET`    | `/appointments/:id`         | Confirmation record                                             |
+| `GET`    | `/appointments?customerId=` | List                                                            |
+| `DELETE` | `/appointments/:id`         | Cancel; frees the slot, keeps the record                        |
+| `GET`    | `/health`, `/health/ready`  | Liveness, readiness                                             |
+| `GET`    | `/metrics`                  | Prometheus                                                      |
 
 Every response shares one envelope:
 
@@ -221,8 +260,8 @@ only signal separating "busy dealership" from "system fighting itself".
 
 There is none — the brief does not ask for it, and building a login system would
 spend effort outside the graded requirements. The one ownership rule the domain
-*implies* is enforced server-side: an appointment associates a customer and
-*their* vehicle, so booking someone else's car returns 403, and confirming
+_implies_ is enforced server-side: an appointment associates a customer and
+_their_ vehicle, so booking someone else's car returns 403, and confirming
 someone else's reservation returns `HOLD_NOT_OWNED`. Both rules read the customer
 id straight off the request body — that is the single seam a real guard would
 replace, by resolving it from a verified token instead.
@@ -265,7 +304,7 @@ busy dealership that degenerates into a hot-row queue: correct, and serialised.
 The failure mode is invisible in a demo and severe in production.
 
 What caught it was asking what the lock physically locks. That reframed the
-exclusion constraint from *backstop* to *authority*, and pessimistic locking was
+exclusion constraint from _backstop_ to _authority_, and pessimistic locking was
 removed entirely rather than supplemented.
 
 A related correction: `ORDER BY least_loaded` looks obviously right for choosing
@@ -283,8 +322,8 @@ rationale attached — which is the failure mode above in a different costume.
 Three were two-file extractions, and the web app existed mainly to justify the
 monorepo, which was then justified by pointing at the web app.
 
-Reframing the question from *"what could be extracted?"* to *"what would each
-extraction prevent?"* left one package standing. `@scheduler/contracts` prevents
+Reframing the question from _"what could be extracted?"_ to _"what would each
+extraction prevent?"_ left one package standing. `@scheduler/contracts` prevents
 something real: the brief has the client stubbed, so a stub restating the
 request shape in its own words drifts from the server with nothing to catch it.
 The rest prevented nothing, and would have cost a restructure of documentation
@@ -301,18 +340,18 @@ None of these would have survived a reading-based review.
 **A DST bug, caught by tests written first.** The slot generator treated opening
 hours as elapsed minutes from local midnight. It passed every ordinary test.
 Two daylight-saving tests failed: a 23-hour day produced 24 slots. Opening hours
-are *wall-clock* times ("we close at 18:00 local"), not elapsed durations — the
+are _wall-clock_ times ("we close at 18:00 local"), not elapsed durations — the
 two coincide on 363 days a year. As written, the dealership would have opened an
 hour late every spring. No reviewer would flag that line.
 
-**An expired-hold constraint gap, caught by an *intermittent* failure.** One
+**An expired-hold constraint gap, caught by an _intermittent_ failure.** One
 test passed under `test:integration` and failed under the coverage run — the
 kind of thing usually dismissed as flakiness and re-run. It was a real defect: a
 PostgreSQL exclusion predicate must be `IMMUTABLE`, so it cannot call `now()`.
 An expired hold therefore still occupies the slot at the constraint level while
 appearing free to every query — the slot advertises itself as bookable and
 rejects every booking. Worse, the `ORDER BY random()` added to reduce contention
-was *masking* it by routing around the broken resource. Fixed by reclaiming
+was _masking_ it by routing around the broken resource. Fixed by reclaiming
 lapsed holds on conflict; the test was rewritten with a single technician and
 bay so it now fails deterministically.
 
@@ -320,7 +359,7 @@ bay so it now fails deterministically.
 green on its first run with exactly the hoped-for result — which is precisely
 when a test deserves the most scrutiny. An independent standalone script
 reported the opposite: 200 × HTTP 500, zero rows. Chasing down which one lied
-found the *script* was at fault (`tsx` compiles with esbuild, which does not
+found the _script_ was at fault (`tsx` compiles with esbuild, which does not
 emit `emitDecoratorMetadata`, so NestJS DI failed before any business logic
 ran). Instrumenting inside Jest confirmed the real distribution and produced a
 genuine insight: losers report `SLOT_UNAVAILABLE`, not `SLOT_CONTENDED`, because
@@ -332,13 +371,13 @@ afterwards.
 ### Scope discipline
 
 An early pass added JWT auth, login, and role-based access. Re-reading the brief
-showed "Domain: Ownership" names the *business domain* — vehicle ownership, the
+showed "Domain: Ownership" names the _business domain_ — vehicle ownership, the
 post-sale product area — not an access-control requirement. The model had
 pattern-matched "production API" and supplied the usual furniture. Cut to the
 single ownership rule the domain implies, with a documented seam and the
 consequences named.
 
-A second instance: the original plan built a React UI *and* the backend. The
+A second instance: the original plan built a React UI _and_ the backend. The
 brief says implement one layer and stub the other. The UI was dropped and the
 effort moved to the graded artifacts.
 
@@ -421,18 +460,18 @@ apps/api/
 
 ## Configuration
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `DATABASE_URL` | — | PostgreSQL connection |
-| `TEST_DATABASE_URL` | — | Integration database; must contain `scheduler_test` |
-| `PORT` | `3000` | HTTP port |
-| `HOLD_TTL_SECONDS` | `120` | Reservation lifetime |
-| `DB_LOCK_TIMEOUT_MS` | `2000` | Fail fast rather than queue |
-| `DB_STATEMENT_TIMEOUT_MS` | `5000` | Fail fast rather than queue |
-| `THROTTLE_BURST_LIMIT` | `20` | Per-IP, per second |
-| `THROTTLE_SUSTAINED_LIMIT` | `300` | Per-IP, per minute |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Tracing is inert unless set |
-| `LOG_LEVEL` | `debug` / `info` | pino level |
+| Variable                      | Default          | Purpose                                             |
+| ----------------------------- | ---------------- | --------------------------------------------------- |
+| `DATABASE_URL`                | —                | PostgreSQL connection                               |
+| `TEST_DATABASE_URL`           | —                | Integration database; must contain `scheduler_test` |
+| `PORT`                        | `3000`           | HTTP port                                           |
+| `HOLD_TTL_SECONDS`            | `120`            | Reservation lifetime                                |
+| `DB_LOCK_TIMEOUT_MS`          | `2000`           | Fail fast rather than queue                         |
+| `DB_STATEMENT_TIMEOUT_MS`     | `5000`           | Fail fast rather than queue                         |
+| `THROTTLE_BURST_LIMIT`        | `20`             | Per-IP, per second                                  |
+| `THROTTLE_SUSTAINED_LIMIT`    | `300`            | Per-IP, per minute                                  |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset            | Tracing is inert unless set                         |
+| `LOG_LEVEL`                   | `debug` / `info` | pino level                                          |
 
 The throttle limits are environment-driven because load testing drives hundreds
 of requests from a single address, which is indistinguishable from abuse at

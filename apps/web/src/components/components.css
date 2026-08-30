@@ -1,0 +1,250 @@
+/* --- Button ------------------------------------------------------------ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-75);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  /* Only transform and opacity animate; colour changes are instant, which is
+     correct for a status board. */
+  transition:
+    transform var(--duration-instant) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.985);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--colour-ink);
+  color: var(--colour-surface-raised);
+}
+
+.btn--secondary {
+  background: var(--colour-surface-raised);
+  border-color: var(--colour-line-strong);
+  color: var(--colour-ink);
+}
+
+.btn--danger {
+  background: var(--colour-surface-raised);
+  border-color: var(--colour-taken);
+  color: var(--colour-taken);
+}
+
+.btn--ghost {
+  color: var(--colour-ink-muted);
+  padding-inline: var(--space-2);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  color: var(--colour-ink);
+}
+
+/* --- Field ------------------------------------------------------------- */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.field__label {
+  font-size: var(--text-50);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--colour-ink-muted);
+}
+
+.field__control {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--colour-line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--colour-surface-raised);
+  font-size: var(--text-100);
+}
+
+.field__control--mono {
+  font-family: var(--font-mono);
+}
+
+.field__control:disabled {
+  background: var(--colour-surface-sunken);
+  color: var(--colour-ink-faint);
+  cursor: not-allowed;
+}
+
+.field__hint {
+  font-size: var(--text-50);
+  color: var(--colour-ink-faint);
+}
+
+.field__error {
+  font-size: var(--text-50);
+  color: var(--colour-taken);
+}
+
+.field--invalid .field__control {
+  border-color: var(--colour-taken);
+}
+
+/* --- Callout ----------------------------------------------------------- */
+.callout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--colour-neutral);
+  border-radius: var(--radius-sm);
+  background: var(--colour-neutral-soft);
+  font-size: var(--text-75);
+}
+
+.callout--info {
+  border-color: var(--colour-info);
+  background: var(--colour-info-soft);
+}
+
+.callout--warn {
+  border-color: var(--colour-held);
+  background: var(--colour-held-soft);
+}
+
+.callout--error {
+  border-color: var(--colour-taken);
+  background: var(--colour-taken-soft);
+}
+
+.callout--success {
+  border-color: var(--colour-free);
+  background: var(--colour-free-soft);
+}
+
+.callout__title {
+  font-size: var(--text-75);
+  font-weight: var(--weight-bold);
+}
+
+.callout__meta {
+  font-family: var(--font-mono);
+  font-size: var(--text-50);
+  color: var(--colour-ink-muted);
+}
+
+/* --- StatusPill -------------------------------------------------------- */
+.pill {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-50);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+}
+
+.pill--confirmed {
+  color: var(--colour-free);
+}
+.pill--held {
+  color: var(--colour-held);
+}
+.pill--cancelled {
+  color: var(--colour-ink-faint);
+}
+.pill--completed {
+  color: var(--colour-info);
+}
+
+/* --- Spinner ----------------------------------------------------------- */
+.spinner {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  border: 2px solid var(--colour-line-strong);
+  border-top-color: var(--colour-ink);
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --- EmptyState -------------------------------------------------------- */
+.empty {
+  padding: var(--space-7) var(--space-5);
+  border: 1px dashed var(--colour-line-strong);
+  border-radius: var(--radius-md);
+  text-align: center;
+  color: var(--colour-ink-muted);
+}
+
+/* --- CopyField --------------------------------------------------------- */
+.copy-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-2);
+  border: var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--colour-surface-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--text-50);
+}
+
+/* --- Meter: which resource ran out ------------------------------------- */
+.meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-50);
+  line-height: 1;
+  color: var(--colour-ink-muted);
+}
+
+.meter__label {
+  opacity: 0.75;
+}
+
+.meter__count {
+  font-variant-numeric: tabular-nums;
+}
+
+.meter__track {
+  width: 0.85rem;
+  flex: none;
+  height: 3px;
+  background: var(--colour-line);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.meter__fill {
+  display: block;
+  height: 100%;
+  background: var(--colour-free);
+}
+
+.meter__fill--zero {
+  background: var(--colour-taken);
+}

@@ -3,23 +3,15 @@
   "ui": "stream",
   "tasks": {
     "build": {
-      "dependsOn": [
-        "^build"
-      ],
-      "outputs": [
-        "dist/**"
-      ]
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
     },
     "test": {
-      "dependsOn": [
-        "^build"
-      ],
+      "dependsOn": ["^build"],
       "outputs": []
     },
     "typecheck": {
-      "dependsOn": [
-        "^build"
-      ]
+      "dependsOn": ["^build"]
     },
     "//#format": {
       "cache": false
@@ -29,27 +21,19 @@
       "persistent": true
     },
     "test:integration": {
-      "dependsOn": [
-        "^build"
-      ],
+      "dependsOn": ["^build"],
       "cache": false,
       "outputs": []
     },
     "test:load": {
-      "dependsOn": [
-        "^build"
-      ],
+      "dependsOn": ["^build"],
       "cache": false,
       "outputs": []
     },
     "test:cov": {
-      "dependsOn": [
-        "^build"
-      ],
+      "dependsOn": ["^build"],
       "cache": false,
-      "outputs": [
-        "coverage/**"
-      ]
+      "outputs": ["coverage/**"]
     }
   },
   "globalEnv": [
@@ -60,6 +44,9 @@
     "LOG_LEVEL",
     "THROTTLE_BURST_LIMIT",
     "THROTTLE_SUSTAINED_LIMIT",
-    "OTEL_EXPORTER_OTLP_ENDPOINT"
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "VITE_API_PROXY_TARGET",
+    "VITE_API_BASE_URL",
+    "VITE_DEMO_CUSTOMER_ID"
   ]
 }

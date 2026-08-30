@@ -1,0 +1,124 @@
+/* --- Slot grid --------------------------------------------------------- */
+.slot-grid {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--slot-min), 1fr));
+  gap: var(--space-2);
+}
+
+.slot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--colour-surface-raised);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  transition:
+    transform var(--duration-instant) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.slot:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: var(--colour-free-soft);
+}
+
+.slot:active:not(:disabled) {
+  transform: translateY(0) scale(0.985);
+}
+
+.slot__note {
+  font-size: var(--text-50);
+  color: var(--colour-ink-faint);
+}
+
+.slot__time {
+  font-size: var(--text-100);
+  font-weight: var(--weight-bold);
+}
+
+.slot--free {
+  border-color: var(--colour-free);
+  color: var(--colour-free);
+}
+
+.slot--selected {
+  border-width: 2px;
+  border-color: var(--colour-held);
+  background: var(--colour-held-soft);
+  color: var(--colour-held);
+}
+
+/* Hatching means state survives greyscale and colour blindness -- it is not
+   carried by hue alone. */
+.slot:disabled {
+  color: var(--colour-ink-faint);
+  cursor: not-allowed;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--colour-surface-sunken) 0 6px,
+    transparent 6px 12px
+  );
+}
+
+.slot__meters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--space-2);
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* --- Opening hours table ----------------------------------------------- */
+.hours {
+  font-family: var(--font-mono);
+  font-size: var(--text-75);
+}
+
+.hours th,
+.hours td {
+  padding: var(--space-1) var(--space-4) var(--space-1) 0;
+  text-align: left;
+  border-bottom: var(--hairline);
+}
+
+/* --- Hold countdown ---------------------------------------------------- */
+.hold-bar {
+  height: 4px;
+  background: var(--colour-line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.hold-bar__fill {
+  height: 100%;
+  background: var(--colour-held);
+  transform: scaleX(var(--progress, 1));
+  transform-origin: left center;
+}
+
+.hold-bar--urgent .hold-bar__fill {
+  background: var(--colour-taken);
+}
+
+.hold-clock {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-300);
+  font-weight: var(--weight-bold);
+}
+
+.hold-clock--urgent {
+  color: var(--colour-taken);
+}

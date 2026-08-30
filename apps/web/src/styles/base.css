@@ -1,0 +1,38 @@
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-100);
+  color: var(--colour-ink);
+  background: var(--colour-surface);
+}
+
+:focus-visible {
+  outline: 2px solid var(--colour-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.eyebrow {
+  font-size: var(--text-50);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--colour-ink-muted);
+}
+
+.muted {
+  color: var(--colour-ink-muted);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
