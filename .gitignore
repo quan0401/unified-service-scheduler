@@ -9,6 +9,9 @@ build/
 coverage/
 *.tsbuildinfo
 
+# Docker bind-mounted database files. State, not source.
+.data/
+
 # Environment — never commit; see .env.example for the required keys
 .env
 .env.local

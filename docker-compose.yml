@@ -1,6 +1,20 @@
-# Postgres for local development.
-# Not required if you already run PostgreSQL 16 locally on 5432 --
-# any PG16 instance with the btree_gist extension available will do.
+# Full stack: PostgreSQL 16 plus the scheduler API.
+#
+#   docker compose up --build -d
+#   docker compose run --rm api pnpm db:seed
+#
+# The API applies migrations on start, so the exclusion constraints exist
+# before it accepts a request.
+#
+# Database files live in ./.data/postgres inside the repository rather than in
+# a Docker-managed named volume. That makes the state visible and disposable --
+# `rm -rf .data` is a full reset -- at the cost of bind-mount I/O, which is
+# noticeably slower on macOS and Windows. For a production deployment a named
+# volume or managed database would be the right call.
+#
+# Host ports are deliberately non-default (55432, 13000) so this stack can run
+# alongside a local PostgreSQL and a local `pnpm start:dev` without a clash.
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -9,15 +23,41 @@ services:
       POSTGRES_USER: scheduler
       POSTGRES_PASSWORD: scheduler
       POSTGRES_DB: scheduler
+      # Bind-mounted host directories are not empty on first use on some
+      # platforms; a subdirectory keeps initdb happy.
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - '5432:5432'
+      - '55432:5432'
     volumes:
-      - scheduler-pgdata:/var/lib/postgresql/data
+      - ./.data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U scheduler -d scheduler']
-      interval: 5s
+      interval: 3s
       timeout: 3s
-      retries: 10
+      retries: 20
 
-volumes:
-  scheduler-pgdata:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: scheduler-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://scheduler:scheduler@postgres:5432/scheduler?schema=public
+      PORT: '3000'
+      LOG_LEVEL: info
+      CORS_ORIGIN: http://localhost:5173
+      HOLD_TTL_SECONDS: '120'
+      DB_LOCK_TIMEOUT_MS: '2000'
+      DB_STATEMENT_TIMEOUT_MS: '5000'
+      # Raised from the default 20/sec: the concurrency demo drives hundreds of
+      # requests from one address, which is indistinguishable from abuse at
+      # production thresholds. The guard stays wired, so a misconfiguration
+      # still surfaces.
+      THROTTLE_BURST_LIMIT: '10000'
+      THROTTLE_SUSTAINED_LIMIT: '100000'
+    ports:
+      - '13000:3000'
+    restart: unless-stopped

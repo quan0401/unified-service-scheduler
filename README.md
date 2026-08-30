@@ -42,8 +42,8 @@ Homebrew, the official Docker image, most managed providers). Verify:
 SELECT default_version FROM pg_available_extensions WHERE name = 'btree_gist';
 ```
 
-If you prefer Docker, `docker compose up -d` starts a suitable PostgreSQL 16 on
-port 5432. It is optional — any PostgreSQL 16 works.
+If you prefer Docker, `docker compose up -d` runs the whole stack — see
+[Run it with Docker](#run-it-with-docker). It is optional; any PostgreSQL 16 works.
 
 ---
 
@@ -99,6 +99,42 @@ The API listens on `http://localhost:3000`. Swagger UI is at `/docs`.
 > hand-written migration SQL — Prisma's schema language cannot express them.
 > Pushing the schema alone creates tables with no constraints, and every
 > concurrency test would then pass vacuously.
+
+## Run it with Docker
+
+Brings up PostgreSQL 16 and the API together. Migrations are applied on start,
+so the exclusion constraints exist before the first request is served.
+
+```bash
+docker compose up --build -d
+docker compose exec api pnpm db:seed    # prints the ids used below
+curl http://localhost:13000/health
+```
+
+The API is on **13000** and PostgreSQL on **55432** — non-default on purpose, so
+the stack runs alongside a local PostgreSQL and a local `pnpm start:dev` without
+a port clash. Swagger UI: `http://localhost:13000/docs`.
+
+**Database files live in `./.data/postgres`**, a bind mount inside the
+repository rather than a Docker-managed named volume. State is visible and
+disposable — `docker compose down && rm -rf .data` is a complete reset — at the
+cost of bind-mount I/O, which is noticeably slower on macOS and Windows. A
+production deployment would use a named volume or a managed database. The
+directory is gitignored.
+
+The API container keeps its full dependency tree rather than being pruned to
+production-only. `prisma migrate deploy` runs at startup, and the migrations —
+not the Prisma schema — are what create the exclusion constraints. Shipping a
+container that cannot apply them to save image size would be a poor trade.
+
+To tear down and keep the data:
+
+```bash
+docker compose down          # containers removed, ./.data survives
+docker compose up -d         # comes back with the same rows
+```
+
+---
 
 ## Test
 
@@ -347,8 +383,10 @@ the dangerous command entirely rather than asking permission to run it.
 
 ```text
 DESIGN.md                     System Design Document (Part 1)
+docker-compose.yml            Full stack: PostgreSQL 16 + the API
+apps/api/Dockerfile           Multi-stage, workspace-aware build
+.data/                        Bind-mounted database files (gitignored)
 docs/ai-collaboration-log.md  Raw decision log
-docker-compose.yml            Optional PostgreSQL 16
 turbo.json                    Task graph; DB-backed tasks are uncached
 tsconfig.base.json            One compiler baseline for every package
 

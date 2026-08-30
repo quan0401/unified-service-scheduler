@@ -423,9 +423,12 @@ every spring.
 *emergent* — SQL semantics, constraint enforcement, retry under contention. A
 mocked repository cannot exhibit an exclusion violation, so a mock-based suite
 would pass identically against a completely broken design. Testcontainers was
-the original plan; the Docker daemon was unavailable on the build machine, so
-the suite targets a dedicated `scheduler_test` database instead, with
-`docker-compose.yml` retained for portability.
+the original plan; the Docker daemon was unavailable when the suite was written,
+so it targets a dedicated `scheduler_test` database instead. That remains the
+arrangement: the test suite talks to a local PostgreSQL, while
+`docker-compose.yml` runs the application stack — API plus PostgreSQL 16, with
+migrations applied on container start and the database files bind-mounted into
+the repository.
 
 ---
 

@@ -1,0 +1,14 @@
+.git
+.gitignore
+.claude
+.data
+.turbo
+**/node_modules
+**/dist
+**/coverage
+**/*.tsbuildinfo
+**/.env
+*.pem
+*.key
+purpose.txt
+VIDEO.md
