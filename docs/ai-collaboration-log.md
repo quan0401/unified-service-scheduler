@@ -389,3 +389,78 @@ where code merely has one. The useful move was treating a documentation claim as
 a testable proposition. The second lesson is narrower: the model's first fix was
 plausible, conventional, and would have quietly capped a scaling property the
 same document was advertising.
+
+---
+
+## 13. A comment that documented behaviour the code never implemented
+
+**Prompt.** "how does opentelemetry works in this app?"
+
+A question, not a task. The intent was to have the existing tracing setup
+explained — the kind of request that is normally answered by reading the file
+and paraphrasing it.
+
+**What reading it carefully produced instead.** `tracing.ts` contained:
+
+```ts
+// Health and metrics scrapes would otherwise dominate trace volume.
+'@opentelemetry/instrumentation-fs': { enabled: false },
+```
+
+The comment and the code are each individually correct and have nothing to do
+with each other. Disabling `instrumentation-fs` suppresses filesystem spans;
+it does nothing whatsoever about `/health` or `/metrics` scrape volume. Those
+were filtered in the *logger*, in a different file. The comment had either
+migrated from the pino config or described an HTTP filter that was planned and
+never written.
+
+**Why no test could have caught this.** There was no failing assertion to find.
+The configuration was valid, the service started, and every test passed. The
+defect existed only in the gap between two artifacts that were separately fine.
+This is the second entry of that shape — entry 11 was a `paths` alias that was
+valid TypeScript and would have broken `nest build` — and the pattern is worth
+naming: the failures that survive a green suite are the ones where nothing is
+individually wrong.
+
+**Three more things surfaced by the same read.**
+
+- **The justification was doing work the data did not.** Both the file header
+  and `DESIGN.md` justified tracing with one claim: a retry storm is legible as
+  "one request span containing several database spans". True, but there was
+  nothing marking those spans as attempts 1, 2, 3 of the same booking, and
+  nothing separating "lost a race" from "ordinary query". The prose was ahead of
+  the telemetry.
+- **Logs and traces could not be joined.** Two correlation schemes —
+  `x-request-id` and `trace_id` — neither aware of the other.
+- **None of it had ever run.** `OTEL_EXPORTER_OTLP_ENDPOINT` was unset in
+  `.env.example`, in `docker-compose.yml`, and in every test. The
+  `if (!endpoint) return` guard had short-circuited on every start this project
+  has ever had. Every tracing claim in `DESIGN.md` was an assertion — the one
+  thing the rest of this repository is careful not to leave standing.
+
+**What was verified before changing anything.** The header's central claim is
+that `startTracing()` must run before any instrumented module is imported.
+TypeScript hoists imports, which would have broken exactly that — so the
+compiled output was checked rather than the source:
+
+```console
+$ head -5 apps/api/dist/main.js
+const tracing_1 = require("./observability/tracing");
+(0, tracing_1.startTracing)();
+const core_1 = require("@nestjs/core");
+```
+
+Correct: TS does not hoist past an intervening statement. The one part that was
+already right, and the part most easily broken by the work that followed — so it
+became a verification step rather than an assumption.
+
+Also checked: `@opentelemetry/api` was *not* a declared dependency, only a
+transitive of `sdk-node`. Adding manual spans by importing it would have been a
+phantom dependency, working locally and breaking under a stricter install.
+
+**Lesson.** Being asked to explain something is a stronger audit than being
+asked to review it. Review invites confirmation that the code is fine;
+explanation forces every comment to be checked against the code that follows it,
+because an explanation is only as good as its weakest claim. Three of the four
+defects here were in prose, not in logic — and the fourth was that the whole
+feature had never once executed.

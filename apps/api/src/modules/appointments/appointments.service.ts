@@ -23,6 +23,8 @@ import {
 } from '../../common/domain-errors';
 import { isWithinOpeningHours, localFieldsAt } from '../availability/slot-generator';
 import { MetricsService } from '../../observability/metrics.service';
+import type { Attributes } from '@opentelemetry/api';
+import { annotateActiveSpan, setActiveSpanAttributes, withSpan } from '../../observability/tracer';
 
 /**
  * How many times a booking may lose a race before reporting contention.
@@ -64,35 +66,42 @@ export class AppointmentsService {
   ) {}
 
   async book(request: BookingRequest): Promise<BookingOutcome> {
-    const startedAt = Date.now();
-    try {
-      const outcome = await this.attemptBooking(request);
-      this.metrics.recordBooking(
-        outcome.replayed ? 'replayed' : 'confirmed',
-        outcome.attempts,
-        (Date.now() - startedAt) / 1000,
-      );
-      return outcome;
-    } catch (error) {
-      const contended = error instanceof SlotContendedError;
-      const outcome = contended
-        ? 'contended'
-        : error instanceof SlotUnavailableError
-          ? 'unavailable'
-          : 'rejected';
+    // The span carries the same outcome vocabulary the metrics use, so a
+    // suspicious counter and the traces behind it can be read together instead
+    // of being reconciled by guesswork.
+    return withSpan('booking.book', spanAttributesFor(request), async (span) => {
+      const startedAt = Date.now();
+      try {
+        const booked = await this.attemptBooking(request);
+        const outcome = booked.replayed ? 'replayed' : 'confirmed';
+        span.setAttributes({ 'booking.outcome': outcome, 'booking.attempts': booked.attempts });
+        this.metrics.recordBooking(outcome, booked.attempts, elapsedSeconds(startedAt));
+        return booked;
+      } catch (error) {
+        const contended = error instanceof SlotContendedError;
+        const outcome = contended
+          ? 'contended'
+          : error instanceof SlotUnavailableError
+            ? 'unavailable'
+            : 'rejected';
 
-      if (contended) this.metrics.recordRetriesExhausted();
+        // Only the outcome. `booking.attempts` is deliberately left alone:
+        // just SlotContendedError carries a count, so writing it here would
+        // zero the value the retry loop already published for every other
+        // outcome -- and a span claiming zero attempts while displaying two
+        // attempt children is worse than one that says nothing.
+        span.setAttribute('booking.outcome', outcome);
 
-      // A contended request made every attempt allowed before giving up.
-      // Recording zero would understate exactly the requests that pushed the
-      // retry budget hardest, which is the population worth watching.
-      this.metrics.recordBooking(
-        outcome,
-        contended ? attemptsOf(error) : 0,
-        (Date.now() - startedAt) / 1000,
-      );
-      throw error;
-    }
+        if (contended) this.metrics.recordRetriesExhausted();
+
+        // A contended request made every attempt allowed before giving up.
+        // Recording zero would understate exactly the requests that pushed the
+        // retry budget hardest, which is the population worth watching.
+        const attempts = contended ? attemptsOf(error) : 0;
+        this.metrics.recordBooking(outcome, attempts, elapsedSeconds(startedAt));
+        throw error;
+      }
+    });
   }
 
   private async attemptBooking(request: BookingRequest): Promise<BookingOutcome> {
@@ -112,21 +121,26 @@ export class AppointmentsService {
     let attempts = 0;
     while (attempts < MAX_BOOKING_ATTEMPTS) {
       attempts++;
+      // Published as it happens, not reconstructed from the error afterwards:
+      // a request that gives up as `unavailable` still made every one of these.
+      setActiveSpanAttributes({ 'booking.attempts': attempts });
       try {
-        const row = await this.bookings.attempt({
-          dealershipId: request.dealershipId,
-          customerId: request.customerId,
-          vehicleId: request.vehicleId,
-          serviceTypeId: request.serviceTypeId,
-          startAt: request.startAt,
-          endAt,
-          dayOfWeek: local.dayOfWeek,
-          startMinute: local.startMinute,
-          durationMinutes: context.durationMinutes,
-          status: AppointmentStatus.CONFIRMED,
-          holdExpiresAt: null,
-          idempotencyKey: request.idempotencyKey ?? null,
-        });
+        const row = await withSpan('booking.attempt', attemptAttributes(attempts), () =>
+          this.bookings.attempt({
+            dealershipId: request.dealershipId,
+            customerId: request.customerId,
+            vehicleId: request.vehicleId,
+            serviceTypeId: request.serviceTypeId,
+            startAt: request.startAt,
+            endAt,
+            dayOfWeek: local.dayOfWeek,
+            startMinute: local.startMinute,
+            durationMinutes: context.durationMinutes,
+            status: AppointmentStatus.CONFIRMED,
+            holdExpiresAt: null,
+            idempotencyKey: request.idempotencyKey ?? null,
+          }),
+        );
 
         // Zero rows means no qualified technician or capable bay was free.
         // That is a settled answer, not a race, so retrying cannot help.
@@ -148,6 +162,7 @@ export class AppointmentsService {
         // Lost the race. The resource we picked was claimed between our read
         // and our insert; another may still be free, so try again.
         this.metrics.recordConflict();
+        annotateActiveSpan('booking.race_lost', { 'booking.attempt_number': attempts });
         this.logger.debug(
           `Booking attempt ${attempts}/${MAX_BOOKING_ATTEMPTS} lost a race for ` +
             `${request.startAt.toISOString()} at dealership ${request.dealershipId}`,
@@ -166,6 +181,20 @@ export class AppointmentsService {
 
   /** Places a short-lived reservation so a customer can complete a booking form. */
   async hold(request: BookingRequest, holdTtlSeconds: number): Promise<BookingOutcome> {
+    // A hold contends for exactly the same slot a booking does, so it gets the
+    // same span shape. Without this, a hold storm would show up in the metrics
+    // as conflicts with no traces to explain them.
+    return withSpan('booking.hold', spanAttributesFor(request), async (span) => {
+      const held = await this.placeHold(request, holdTtlSeconds);
+      span.setAttribute('booking.attempts', held.attempts);
+      return held;
+    });
+  }
+
+  private async placeHold(
+    request: BookingRequest,
+    holdTtlSeconds: number,
+  ): Promise<BookingOutcome> {
     const context = await this.loadAndValidate(request);
     const endAt = new Date(request.startAt.getTime() + context.durationMinutes * 60_000);
     const local = localFieldsAt(request.startAt, context.timezone);
@@ -173,27 +202,33 @@ export class AppointmentsService {
     let attempts = 0;
     while (attempts < MAX_BOOKING_ATTEMPTS) {
       attempts++;
+      // Published as it happens, not reconstructed from the error afterwards:
+      // a request that gives up as `unavailable` still made every one of these.
+      setActiveSpanAttributes({ 'booking.attempts': attempts });
       try {
-        const row = await this.bookings.attempt({
-          dealershipId: request.dealershipId,
-          customerId: request.customerId,
-          vehicleId: request.vehicleId,
-          serviceTypeId: request.serviceTypeId,
-          startAt: request.startAt,
-          endAt,
-          dayOfWeek: local.dayOfWeek,
-          startMinute: local.startMinute,
-          durationMinutes: context.durationMinutes,
-          status: AppointmentStatus.HELD,
-          holdExpiresAt: new Date(Date.now() + holdTtlSeconds * 1000),
-          idempotencyKey: null,
-        });
+        const row = await withSpan('booking.attempt', attemptAttributes(attempts), () =>
+          this.bookings.attempt({
+            dealershipId: request.dealershipId,
+            customerId: request.customerId,
+            vehicleId: request.vehicleId,
+            serviceTypeId: request.serviceTypeId,
+            startAt: request.startAt,
+            endAt,
+            dayOfWeek: local.dayOfWeek,
+            startMinute: local.startMinute,
+            durationMinutes: context.durationMinutes,
+            status: AppointmentStatus.HELD,
+            holdExpiresAt: new Date(Date.now() + holdTtlSeconds * 1000),
+            idempotencyKey: null,
+          }),
+        );
 
         if (!row) throw new SlotUnavailableError({ startAt: request.startAt.toISOString() });
         return { appointment: await this.requireById(row.id), replayed: false, attempts };
       } catch (error) {
         if (!isLostRace(error)) throw error;
         this.metrics.recordConflict();
+        annotateActiveSpan('booking.race_lost', { 'booking.attempt_number': attempts });
         if (attempts >= MAX_BOOKING_ATTEMPTS) break;
         await this.bookings.reclaimExpiredHolds(request.startAt, endAt);
         await jitteredBackoff(attempts);
@@ -337,6 +372,33 @@ export class AppointmentsService {
     }
     return appointment;
   }
+}
+
+/**
+ * Span attributes describing *what* was requested.
+ *
+ * Deliberately no customer, vehicle, or appointment id. Those identify a
+ * person, and a trace backend is the place in the stack that retains longest
+ * and secures least. Dealership, service type, and time are enough to find the
+ * contended resource, which is the question a trace is opened to answer.
+ */
+function spanAttributesFor(request: BookingRequest): Attributes {
+  return {
+    'booking.dealership_id': request.dealershipId,
+    'booking.service_type_id': request.serviceTypeId,
+    'booking.start_at': request.startAt.toISOString(),
+  };
+}
+
+function attemptAttributes(attempt: number): Attributes {
+  return {
+    'booking.attempt_number': attempt,
+    'booking.max_attempts': MAX_BOOKING_ATTEMPTS,
+  };
+}
+
+function elapsedSeconds(startedAt: number): number {
+  return (Date.now() - startedAt) / 1000;
 }
 
 /** Recovers the attempt count a SlotContendedError recorded in its details. */

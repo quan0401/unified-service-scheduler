@@ -58,6 +58,39 @@ services:
       # still surfaces.
       THROTTLE_BURST_LIMIT: '10000'
       THROTTLE_SUSTAINED_LIMIT: '100000'
+      # Empty unless supplied, and empty is falsy, so startTracing() returns
+      # immediately and the default stack behaves exactly as it did before
+      # Jaeger existed. Set it to switch tracing on -- see the jaeger service.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     ports:
       - '13000:3000'
+    restart: unless-stopped
+
+  # Trace backend, off by default.
+  #
+  #   OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 \
+  #     docker compose --profile observability up -d --build
+  #
+  # Then open http://localhost:16686 and search for service `scheduler-api`.
+  # A contended booking appears as one `booking.book` span containing several
+  # `booking.attempt` children -- a retry storm, visibly a retry storm.
+  #
+  # Storage is in-memory: traces vanish on restart and nothing is written under
+  # ./.data. No `depends_on` from the api either, because a profiled service
+  # cannot be depended on from an unprofiled one -- and it does not need to be,
+  # since OTLP export over HTTP tolerates an absent collector.
+  #
+  # Tearing down needs the profile too. A plain `docker compose down` does not
+  # see this service and leaves it running; `--remove-orphans` does not catch it
+  # either, since it is declared here rather than orphaned. Use
+  # `docker compose --profile observability down`.
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: scheduler-jaeger
+    profiles: ['observability']
+    environment:
+      COLLECTOR_OTLP_ENABLED: 'true'
+    ports:
+      - '16686:16686' # web UI
+      - '4318:4318' # OTLP over HTTP
     restart: unless-stopped

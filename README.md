@@ -137,6 +137,37 @@ docker compose down          # containers removed, ./.data survives
 docker compose up -d         # comes back with the same rows
 ```
 
+### Seeing the traces
+
+Tracing is off unless an exporter endpoint is set. To switch it on, bring the
+stack up with the `observability` profile, which adds Jaeger:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 \
+  docker compose --profile observability up -d --build
+```
+
+Then drive some contention and open <http://localhost:16686>, service
+`scheduler-api`. A losing booking shows as one `booking.book` span containing
+several `booking.attempt` children, each failed attempt carrying the `23P01`
+exclusion-constraint rejection that caused the retry. That is the whole
+concurrency argument of this service, visible as data rather than described in
+prose.
+
+Jaeger stores traces in memory, so nothing is written under `./.data` and they
+vanish on restart. The default `docker compose up -d` is unaffected — no
+profile, no Jaeger, and the API's tracing guard short-circuits as before.
+
+One trap worth knowing: a profiled service is invisible to any command that does
+not name its profile, **including `down`**. A plain `docker compose down` stops
+PostgreSQL and the API and leaves Jaeger running, and `--remove-orphans` will
+not catch it either, since Jaeger is a declared service rather than an orphan.
+Name the profile to tear the whole stack down:
+
+```bash
+docker compose --profile observability down
+```
+
 ---
 
 ## Test
@@ -163,7 +194,7 @@ Turbo caches `build` and `test`. The database-backed tasks are declared
 file inputs, so a cached "pass" could report success for a suite that never ran
 against the current schema.
 
-**91 tests. 93.6% statements, 94.8% lines, 97.1% functions.**
+**107 tests. 94.7% statements, 96.0% lines, 97.4% functions.**
 
 | Suite                               | Tests | What it proves                                                        |
 | ----------------------------------- | ----- | --------------------------------------------------------------------- |
@@ -471,7 +502,7 @@ apps/api/
 | `DB_STATEMENT_TIMEOUT_MS`     | `5000`           | Fail fast rather than queue                         |
 | `THROTTLE_BURST_LIMIT`        | `20`             | Per-IP, per second                                  |
 | `THROTTLE_SUSTAINED_LIMIT`    | `300`            | Per-IP, per minute                                  |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset            | Tracing is inert unless set                         |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset            | Tracing is inert unless set; `http://jaeger:4318`    |
 | `LOG_LEVEL`                   | `debug` / `info` | pino level                                          |
 
 The throttle limits are environment-driven because load testing drives hundreds

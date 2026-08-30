@@ -15,6 +15,7 @@ import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentation
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
+import { isProbePath } from './probe-paths';
 
 let sdk: NodeSDK | undefined;
 
@@ -32,8 +33,22 @@ export function startTracing(): void {
     traceExporter: new OTLPTraceExporter({ url: `${endpoint}/v1/traces` }),
     instrumentations: [
       getNodeAutoInstrumentations({
-        // Health and metrics scrapes would otherwise dominate trace volume.
+        // Filesystem spans are extremely high volume and say nothing about a
+        // service whose interesting work is SQL. They bury the booking path.
         '@opentelemetry/instrumentation-fs': { enabled: false },
+
+        // Health probes and metric scrapes would otherwise dominate trace
+        // volume. Filtered against the same list logging.config.ts uses, so an
+        // endpoint cannot end up excluded from logs but present in traces.
+        '@opentelemetry/instrumentation-http': {
+          ignoreIncomingRequestHook: (request) => isProbePath(request.url),
+        },
+
+        // Left enabled deliberately: it injects trace_id and span_id into every
+        // pino record, which is the only reason a log line can be traced back
+        // to its request. It works because startTracing() runs before
+        // nestjs-pino is required -- see the note above.
+        '@opentelemetry/instrumentation-pino': { enabled: true },
       }),
     ],
   });
