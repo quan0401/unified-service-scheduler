@@ -49,8 +49,8 @@ If you prefer Docker, `docker compose up -d` runs the whole stack — see
 
 ## Workspace
 
-A pnpm workspace driven by Turborepo. Two packages, and the split is narrow on
-purpose:
+A pnpm workspace driven by Turborepo. Three workspaces, and the split is narrow
+on purpose:
 
 ```text
 apps/web/              the Vite + React demo client
@@ -204,12 +204,15 @@ Turbo caches `build` and `test`. The database-backed tasks are declared
 file inputs, so a cached "pass" could report success for a suite that never ran
 against the current schema.
 
-**107 tests. 94.7% statements, 96.0% lines, 97.4% functions.**
+**107 tests. 93.9% statements, 95.0% lines, 97.4% functions.**
 
 | Suite                               | Tests | What it proves                                                        |
 | ----------------------------------- | ----- | --------------------------------------------------------------------- |
 | `slot-generator.spec.ts`            | 16    | DST transitions, closed days, closing-time overrun, foreign timezones |
 | `env.spec.ts`                       | 7     | Malformed configuration falls back instead of yielding `NaN`          |
+| `probe-paths.spec.ts`               | 8     | Health and metrics paths are filtered from logs and traces alike      |
+| `tracer.spec.ts`                    | 6     | Span attributes, the outcome vocabulary, and recorded exceptions      |
+| `tracing.spec.ts`                   | 2     | Tracing stays inert when no OTLP endpoint is configured               |
 | `exclusion-constraints.e2e-spec.ts` | 12    | The database rejects overlaps — written _before_ any service code     |
 | `booking.e2e-spec.ts`               | 21    | Booking, refusals, holds, ownership, idempotency, cancellation        |
 | `availability.e2e-spec.ts`          | 10    | Occupancy reflects skills, capabilities, shifts, bookings             |
@@ -450,7 +453,7 @@ produced.
 
 Every architectural decision here has a stated reason, and every reason is
 either mechanical (what the lock locks, what the constraint predicate can
-evaluate) or measured (91 tests, 258 ms for 200 concurrent bookings, a verified
+evaluate) or measured (107 tests, ~520 ms for 200 concurrent bookings, a verified
 status distribution). Where a decision has a cost — Prisma with PgBouncer
 disabling prepared statements, no authentication, at-least-once event delivery —
 it is named in `DESIGN.md` rather than left for a reader to discover.
@@ -512,7 +515,7 @@ apps/api/
 | `DB_STATEMENT_TIMEOUT_MS`     | `5000`           | Fail fast rather than queue                         |
 | `THROTTLE_BURST_LIMIT`        | `20`             | Per-IP, per second                                  |
 | `THROTTLE_SUSTAINED_LIMIT`    | `300`            | Per-IP, per minute                                  |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset            | Tracing is inert unless set; `http://jaeger:4318`    |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset            | Tracing is inert unless set; `http://jaeger:4318`   |
 | `LOG_LEVEL`                   | `debug` / `info` | pino level                                          |
 
 The throttle limits are environment-driven because load testing drives hundreds
