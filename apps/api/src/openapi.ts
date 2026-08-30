@@ -7,6 +7,15 @@
  *
  * Written to disk on boot in development, and served at /docs, so the committed
  * artefact is always regenerated rather than maintained by hand.
+ *
+ * OPENAPI_SERVER_URL exists because the API is not always mounted at the root
+ * of the origin serving these docs. In production nginx serves the SPA at `/`
+ * and proxies `/api/` to this service, stripping the prefix -- so the app still
+ * sees `/customers`, but a browser must ask for `/api/customers`. Without a
+ * `servers` entry Swagger UI resolves paths against the page origin and issues
+ * requests to `/customers`, which the SPA fallback answers with index.html and
+ * a misleading 200. Defaults to `/` so a local `pnpm start:dev`, where the API
+ * really is at the root, is unaffected.
  */
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -23,6 +32,7 @@ export function writeOpenApiDocument(app: INestApplication): void {
         'so a slot can never be double-booked regardless of concurrency.',
     )
     .setVersion('1.0.0')
+    .addServer(process.env.OPENAPI_SERVER_URL ?? '/')
     .build();
 
   // cleanupOpenApiDoc resolves the Zod-generated schemas into plain OpenAPI --

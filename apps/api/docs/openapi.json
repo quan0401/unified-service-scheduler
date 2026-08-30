@@ -284,7 +284,11 @@
     "contact": {}
   },
   "tags": [],
-  "servers": [],
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
   "components": {
     "schemas": {
       "CreateAppointmentDto": {
