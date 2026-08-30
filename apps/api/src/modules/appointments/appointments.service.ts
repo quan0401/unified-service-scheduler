@@ -8,9 +8,9 @@
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { AppointmentStatus } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '../../prisma/prisma.service';
 import { BookingRepository, APPOINTMENT_DETAIL, type BookedRow } from './booking.repository';
-import { isExclusionViolation, isUniqueViolation } from '../common/postgres-errors';
+import { isExclusionViolation, isUniqueViolation } from '../../common/postgres-errors';
 import {
   HoldExpiredError,
   NotFoundError,
@@ -19,9 +19,9 @@ import {
   SlotUnavailableError,
   VehicleNotOwnedError,
   AppointmentNotCancellableError,
-} from '../common/domain-errors';
+} from '../../common/domain-errors';
 import { isWithinOpeningHours, localFieldsAt } from '../availability/slot-generator';
-import { MetricsService } from '../observability/metrics.service';
+import { MetricsService } from '../../observability/metrics.service';
 
 /**
  * How many times a booking may lose a race before reporting contention.

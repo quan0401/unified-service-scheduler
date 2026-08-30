@@ -7,8 +7,8 @@
  * is the only part that must touch the database.
  */
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { NotFoundError } from '../common/domain-errors';
+import { PrismaService } from '../../prisma/prisma.service';
+import { NotFoundError } from '../../common/domain-errors';
 import { generateSlots, type Slot } from './slot-generator';
 import type { AvailabilityView, AvailabilitySlotView } from './availability.dto';
 

@@ -14,8 +14,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { AppointmentStatus } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { MetricsService } from '../observability/metrics.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { MetricsService } from '../../observability/metrics.service';
 
 @Injectable()
 export class HoldSweeper {

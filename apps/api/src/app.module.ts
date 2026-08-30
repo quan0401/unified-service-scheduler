@@ -6,10 +6,10 @@ import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import { PrismaModule } from './prisma/prisma.module';
 import { ObservabilityModule } from './observability/observability.module';
-import { CatalogModule } from './catalog/catalog.module';
-import { AvailabilityModule } from './availability/availability.module';
-import { AppointmentsModule } from './appointments/appointments.module';
-import { BackgroundJobsModule } from './outbox/outbox.module';
+import { CatalogModule } from './modules/catalog/catalog.module';
+import { AvailabilityModule } from './modules/availability/availability.module';
+import { AppointmentsModule } from './modules/appointments/appointments.module';
+import { BackgroundJobsModule } from './modules/background-jobs/background-jobs.module';
 import { RequestContextMiddleware } from './common/request-context.middleware';
 import { loggingConfig } from './observability/logging.config';
 

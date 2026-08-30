@@ -17,7 +17,7 @@
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '../../prisma/prisma.service';
 
 /** Bounded so one poll cannot monopolise a connection under a backlog. */
 const RELAY_BATCH_SIZE = 100;

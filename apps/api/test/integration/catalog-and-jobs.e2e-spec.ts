@@ -11,8 +11,8 @@ import { AppointmentStatus } from '@prisma/client';
 import { createTestApp } from '../support/app';
 import { testDb, resetData } from '../support/db';
 import { createScenario, type Scenario } from '../support/fixtures';
-import { OutboxRelay } from '../../src/outbox/outbox.relay';
-import { HoldSweeper } from '../../src/holds/hold-sweeper.service';
+import { OutboxRelay } from '../../src/modules/background-jobs/outbox.relay';
+import { HoldSweeper } from '../../src/modules/background-jobs/hold-sweeper.service';
 
 const MONDAY_9AM = '2026-09-07T09:00:00.000Z';
 const UTC = { timezone: 'UTC' } as const;

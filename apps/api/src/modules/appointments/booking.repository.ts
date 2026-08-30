@@ -23,7 +23,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import { AppointmentStatus, Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '../../prisma/prisma.service';
 
 export interface BookingAttempt {
   dealershipId: string;

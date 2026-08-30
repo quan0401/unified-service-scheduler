@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { NotFoundError } from '../common/domain-errors';
+import { PrismaService } from '../../prisma/prisma.service';
+import { NotFoundError } from '../../common/domain-errors';
 
 @Injectable()
 export class CatalogService {
