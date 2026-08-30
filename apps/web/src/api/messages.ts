@@ -79,6 +79,11 @@ const DOMAIN_COPY: Record<DomainErrorCode, ErrorCopy> = {
     body: 'Several bookings hit this exact slot at once and the server ran out of retries. This one is worth trying again.',
     recovery: 'Try again',
   },
+  SERVICE_OVERLOADED: {
+    title: 'The service is busy',
+    body: 'The server ran out of database connections before it could look at this slot. Nothing is wrong with the time you picked -- the same request should work in a moment.',
+    recovery: 'Try again',
+  },
   VALIDATION_FAILED: {
     title: 'Invalid request',
     body: 'The server rejected the request shape.',

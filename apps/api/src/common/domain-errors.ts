@@ -86,6 +86,21 @@ export class SlotContendedError extends DomainError {
   }
 }
 
+/**
+ * The API could not get a database connection in time.
+ *
+ * Deliberately not a SLOT_CONTENDED: nothing about the slot is wrong, and
+ * telling a client to pick another time would send them somewhere equally
+ * unavailable. This is the server being at capacity, which is a 503 the caller
+ * may retry -- and, unlike a slot conflict, something worth alerting on.
+ */
+export class ServiceOverloadedError extends DomainError {
+  readonly code = 'SERVICE_OVERLOADED' as const;
+  constructor() {
+    super('The service is busy. Please try again in a moment.');
+  }
+}
+
 export class HoldExpiredError extends DomainError {
   readonly code = 'HOLD_EXPIRED' as const;
   constructor(holdId: string) {

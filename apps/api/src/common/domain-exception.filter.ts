@@ -37,6 +37,10 @@ const STATUS_BY_CODE: Record<DomainErrorCode, HttpStatus> = {
   SLOT_CONTENDED: HttpStatus.CONFLICT,
   HOLD_EXPIRED: HttpStatus.CONFLICT,
   APPOINTMENT_NOT_CANCELLABLE: HttpStatus.CONFLICT,
+
+  // Capacity, not conflict. Retryable, and the one code here that should
+  // page someone if it becomes common.
+  SERVICE_OVERLOADED: HttpStatus.SERVICE_UNAVAILABLE,
 };
 
 @Catch()
