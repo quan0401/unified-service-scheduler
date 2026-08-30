@@ -15,7 +15,7 @@
     "test:load": "turbo run test:load",
     "test:cov": "turbo run test:cov",
     "typecheck": "turbo run typecheck",
-    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,css,html}\"",
     "db:deploy": "pnpm --filter @scheduler/api db:deploy",
     "db:seed": "pnpm --filter @scheduler/api db:seed",
     "start:dev": "pnpm --filter @scheduler/api start:dev"

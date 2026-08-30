@@ -71,6 +71,20 @@
         ]
       }
     },
+    "/customers": {
+      "get": {
+        "operationId": "CatalogController_listCustomers",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Catalog"
+        ]
+      }
+    },
     "/customers/{customerId}/vehicles": {
       "get": {
         "operationId": "CatalogController_listVehicles",

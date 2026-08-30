@@ -55,6 +55,17 @@ describe('catalog, health, and background jobs', () => {
       expect(serviceType.durationMinutes).toBeGreaterThan(0);
     });
 
+    it('lists customers so a client can offer a picker', async () => {
+      // Seed ids are gen_random_uuid(), so without this endpoint the only way
+      // to discover a customer is the seed script's stdout.
+      const response = await request(app.getHttpServer()).get('/customers').expect(200);
+      const customer = response.body.data.find((c: { id: string }) => c.id === scenario.customerId);
+
+      expect(customer).toBeDefined();
+      expect(customer.name).toEqual(expect.any(String));
+      expect(customer.email).toEqual(expect.any(String));
+    });
+
     it('lists a customer vehicles', async () => {
       const response = await request(app.getHttpServer())
         .get(`/customers/${scenario.customerId}/vehicles`)

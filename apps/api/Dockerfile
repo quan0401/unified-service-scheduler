@@ -25,6 +25,10 @@ FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json apps/api/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
+# Copied for lockfile fidelity only -- the lockfile now has an apps/web
+# importer, and pnpm --frozen-lockfile fails if the manifest is absent.
+# The API image deliberately does not build the UI.
+COPY apps/web/package.json apps/web/package.json
 RUN pnpm install --frozen-lockfile
 
 FROM deps AS build

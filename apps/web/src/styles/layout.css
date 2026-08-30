@@ -1,0 +1,145 @@
+.app {
+  display: grid;
+  grid-template-rows: var(--header-height) 1fr;
+  min-height: 100vh;
+}
+
+/* --- Chrome: dark frame carrying environment state --------------------- */
+.app__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding-inline: var(--space-5);
+  background: var(--colour-chrome);
+  color: var(--colour-chrome-ink);
+  border-bottom: 1px solid var(--colour-chrome-line);
+}
+
+.app__brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.app__brand-name {
+  font-size: var(--text-100);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+}
+
+.app__brand-sub {
+  font-size: var(--text-50);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--colour-chrome-ink-dim);
+}
+
+.app__nav {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.app__nav-link {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-75);
+  font-weight: var(--weight-medium);
+  color: var(--colour-chrome-ink-dim);
+  text-decoration: none;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.app__nav-link:hover {
+  color: var(--colour-chrome-ink);
+  background: var(--colour-chrome-raised);
+}
+
+.app__nav-link[aria-current='page'] {
+  color: var(--colour-chrome-ink);
+  background: var(--colour-chrome-raised);
+  box-shadow: inset 0 -2px 0 var(--colour-info);
+}
+
+.app__main {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding: var(--space-6) var(--space-5) var(--space-8);
+}
+
+/* --- Page furniture ---------------------------------------------------- */
+.page__head {
+  margin-bottom: var(--space-6);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--colour-line-strong);
+}
+
+.page__title {
+  font-size: var(--text-400);
+  letter-spacing: -0.02em;
+}
+
+.page__lede {
+  margin-top: var(--space-2);
+  max-width: 62ch;
+  color: var(--colour-ink-muted);
+}
+
+.panel {
+  background: var(--colour-surface-raised);
+  border: var(--hairline);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+}
+
+.panel + .panel {
+  margin-top: var(--space-5);
+}
+
+.panel__title {
+  font-size: var(--text-200);
+  margin-bottom: var(--space-4);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.cluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.grid-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--space-4);
+}
+
+/* --- Definition rows used by the receipt and appointment cards ---------- */
+.record {
+  display: grid;
+  grid-template-columns: minmax(7rem, max-content) 1fr;
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+}
+
+.record dt {
+  font-size: var(--text-50);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--colour-ink-muted);
+  align-self: center;
+}
+
+.record dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-75);
+}

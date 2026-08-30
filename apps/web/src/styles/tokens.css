@@ -1,0 +1,103 @@
+/*
+ * Service desk instrument. The user is an advisor at a counter deciding in
+ * three seconds whether nine o'clock is free, so the references are a departure
+ * board and a dispatch console -- dense, high contrast, tabular.
+ *
+ * Four states get four colours and nothing else is coloured. A status board
+ * that colours its buttons has no colours left for status.
+ */
+:root {
+  color-scheme: light;
+
+  /* Surfaces: dark chrome frame, warm paper working area. */
+  --colour-chrome: #101418;
+  --colour-chrome-raised: #1b2128;
+  --colour-chrome-ink: #e7ecf1;
+  --colour-chrome-ink-dim: #8e9aa6;
+  --colour-chrome-line: #2a323b;
+
+  --colour-surface: #fbfaf8;
+  --colour-surface-raised: #ffffff;
+  --colour-surface-sunken: #f2f0ec;
+  --colour-line: #dcd8d1;
+  --colour-line-strong: #b9b3aa;
+
+  --colour-ink: #14171a;
+  --colour-ink-muted: #5b646d;
+  --colour-ink-faint: #8b949d;
+
+  /* State. */
+  --colour-free: #17784a;
+  --colour-free-soft: #e4f2ea;
+  --colour-held: #a35c00;
+  --colour-held-soft: #fdf0dc;
+  --colour-taken: #a02334;
+  --colour-taken-soft: #fbe6e8;
+  --colour-info: #1d4ed8;
+  --colour-info-soft: #e6ecfd;
+  --colour-neutral: #6b7280;
+  --colour-neutral-soft: #eeeeee;
+
+  --colour-focus: #1d4ed8;
+
+  /* Type: system stacks, so nothing loads and nothing flashes mid-recording. */
+  --font-sans: ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+
+  /* 1.200 minor third from 15px. Times and ids live at --text-100 in mono. */
+  --text-50: 0.6875rem;
+  --text-75: 0.8125rem;
+  --text-100: 0.9375rem;
+  --text-200: 1.125rem;
+  --text-300: 1.375rem;
+  --text-400: 1.75rem;
+  --text-500: 2.25rem;
+
+  --leading-tight: 1.15;
+  --leading-snug: 1.35;
+  --leading-body: 1.55;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-bold: 650;
+
+  --tracking-caps: 0.08em;
+
+  /* Space: 4px base. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 2.5rem;
+  --space-8: 3rem;
+
+  /* Shape: instruments have edges. */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --hairline: 1px solid var(--colour-line);
+  --shadow-overlay: 0 8px 28px rgb(20 23 26 / 0.18);
+
+  /* Motion: transform and opacity only. */
+  --duration-instant: 90ms;
+  --duration-fast: 160ms;
+  --duration-slow: 320ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Layout. */
+  --rail-width: 13rem;
+  --header-height: 3.25rem;
+  --page-max: 78rem;
+  --slot-min: 7.75rem;
+}
+
+/* Zeroing at the token level applies everywhere at once. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant: 0ms;
+    --duration-fast: 0ms;
+    --duration-slow: 0ms;
+  }
+}

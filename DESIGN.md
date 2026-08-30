@@ -16,9 +16,9 @@ The brief lists three requirements. The first and third are straightforward CRUD
 
 Requirement 2 is not:
 
-> **2. Real-Time Availability Check** — *before confirming*, check the
-> availability of both a ServiceBay and a qualified Technician *for the entire
-> service duration*.
+> **2. Real-Time Availability Check** — _before confirming_, check the
+> availability of both a ServiceBay and a qualified Technician _for the entire
+> service duration_.
 
 "Check, then confirm" is a textbook check-then-act race. Two requests both read
 "Ramp A is free at 09:00", both pass their check, and both insert. The
@@ -29,11 +29,11 @@ diary, physically unable to write two bookings in the same box. Replacing that
 human means reproducing the guarantee, not just the workflow.
 
 **Everything in this design follows from that.** The goal is to make an
-overlapping booking *structurally impossible* rather than merely unlikely —
+overlapping booking _structurally impossible_ rather than merely unlikely —
 while staying concurrent, because a lock that serialises correctly but throttles
 throughput has only moved the failure somewhere harder to see.
 
-Secondary requirement, from *Build For the Future*: scalability, performance,
+Secondary requirement, from _Build For the Future_: scalability, performance,
 reliability, maintainability, observability. These shape the design as much as
 the three functional requirements — noted inline where they do.
 
@@ -104,18 +104,18 @@ that makes the common case fast; none of it is trusted to be sufficient.
 
 ### Component roles
 
-| Component | Role | Why it exists |
-|---|---|---|
+| Component                      | Role                                                                 | Why it exists                                                                                                                                                             |
+| ------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Request context middleware** | Assigns a correlation ID per request, honours inbound `X-Request-Id` | A booking that retries emits several log lines; without a shared id they cannot be reassembled. Uses `AsyncLocalStorage` so domain code never carries a transport concern |
-| **Throttler** | Per-IP rate limiting, two windows (burst + sustained) | Cheap abuse protection. Per-IP rather than per-customer only because there is no auth — named as a limitation in §8 |
-| **Zod validation** | Rejects malformed requests before any handler runs | One schema yields the runtime validator, the TypeScript type, *and* the OpenAPI document, so the three cannot drift |
-| **Availability** | Generates candidate slots, marks each free or busy | Split in two: a **pure function** for slot shape, one query for occupancy. Advisory by design — never a reservation |
-| **Booking repository** | The atomic claim statement | Selection and insertion in **one** statement, so there is no window between finding a free bay and taking it |
-| **Appointments service** | Domain rules, retry policy, idempotency | Holds no locks and opens no long transactions; mutual exclusion is delegated entirely to the database |
-| **Exception filter** | Maps domain errors to HTTP status codes | A single exit point means no driver message or stack trace can escape into a response |
-| **Hold sweeper** | Deletes lapsed reservations | Housekeeping, *not* correctness — see §5 |
-| **Outbox relay** | Publishes confirmation events | Keeps all network I/O off the booking path |
-| **PostgreSQL** | Source of truth **and** the concurrency arbiter | The only component that sees both racing writes, so the only one that can adjudicate |
+| **Throttler**                  | Per-IP rate limiting, two windows (burst + sustained)                | Cheap abuse protection. Per-IP rather than per-customer only because there is no auth — named as a limitation in §8                                                       |
+| **Zod validation**             | Rejects malformed requests before any handler runs                   | One schema yields the runtime validator, the TypeScript type, _and_ the OpenAPI document, so the three cannot drift                                                       |
+| **Availability**               | Generates candidate slots, marks each free or busy                   | Split in two: a **pure function** for slot shape, one query for occupancy. Advisory by design — never a reservation                                                       |
+| **Booking repository**         | The atomic claim statement                                           | Selection and insertion in **one** statement, so there is no window between finding a free bay and taking it                                                              |
+| **Appointments service**       | Domain rules, retry policy, idempotency                              | Holds no locks and opens no long transactions; mutual exclusion is delegated entirely to the database                                                                     |
+| **Exception filter**           | Maps domain errors to HTTP status codes                              | A single exit point means no driver message or stack trace can escape into a response                                                                                     |
+| **Hold sweeper**               | Deletes lapsed reservations                                          | Housekeeping, _not_ correctness — see §5                                                                                                                                  |
+| **Outbox relay**               | Publishes confirmation events                                        | Keeps all network I/O off the booking path                                                                                                                                |
+| **PostgreSQL**                 | Source of truth **and** the concurrency arbiter                      | The only component that sees both racing writes, so the only one that can adjudicate                                                                                      |
 
 ### Code organization
 
@@ -123,7 +123,7 @@ The service is a **modular monolith**, not a set of services. One database
 transaction has to span the technician check, the bay check, and the insert; if
 those lived in separate services that transaction becomes a distributed one,
 and the guarantee this whole design rests on becomes a saga with compensations.
-The modules are drawn where services *could* later be split, but splitting them
+The modules are drawn where services _could_ later be split, but splitting them
 now would trade the strongest property of the system for an organizational
 benefit nobody currently needs.
 
@@ -148,6 +148,31 @@ the response envelope types, and the error-code union, so validation, the
 TypeScript type, and the published OpenAPI document all derive from one
 declaration. It exports plain Zod and depends only on `zod` — applying
 `createZodDto` there would drag NestJS into anything a browser imports.
+
+That prediction has since been tested rather than left as an assertion. A demo
+client now lives at `apps/web` — a small Vite and React application that
+consumes the package directly, importing its types and calling
+`createHoldSchema.safeParse` on the booking form before submitting. Because the
+browser and the server validate against the same declaration, the drift this
+package exists to prevent cannot occur silently; a shape change breaks the
+client's typecheck. The client resolves the package to its _source_ rather than
+its build output, matching the precedent already set in
+`apps/api/jest.config.js`, so a stale `dist` can never let types and runtime
+disagree.
+
+The client does not change the shape of the submission: the backend remains the
+implemented layer, and the OpenAPI document and cURL walkthrough remain the
+contract the brief asked for. What it adds is legibility. The concurrency
+guarantee was previously only demonstrable through a shell loop and a `psql`
+count; it can now be watched. The one place the client still restates a server
+shape in its own words is the appointment record, which `@scheduler/contracts`
+does not publish because it exists only as a Prisma inference — that is isolated
+to a single file, so publishing an `AppointmentView` later is a deletion rather
+than a refactor.
+
+Adding it required exactly one endpoint, `GET /customers`. Seed identifiers are
+`gen_random_uuid()`, so without it the only way to discover a customer was the
+seed script's stdout — acceptable for a cURL walkthrough, not for a picker.
 
 Prisma, the domain error classes, and the slot generator stay inside the API.
 Each has exactly one consumer; extracting them would add import boundaries
@@ -239,12 +264,12 @@ retry logic, or how many API instances are running.
 
 **Rejected: `SELECT … FOR UPDATE` on the technician and bay rows.** This was the
 first design, and it is wrong in an instructive way. A row lock locks the
-*resource*, not the *time slot* — booking a technician at 09:00 blocks an
+_resource_, not the _time slot_ — booking a technician at 09:00 blocks an
 unrelated 15:00 booking for the same technician. At a busy dealership that
 degenerates into a hot-row queue: correct, and serialised. Exclusion constraints
 conflict only on `(resource, overlapping range)`, the finest granularity
 available, so unrelated bookings never interact. The constraints therefore
-*replace* pessimistic locking rather than backing it up.
+_replace_ pessimistic locking rather than backing it up.
 
 Selection and insertion happen in one statement:
 
@@ -345,7 +370,7 @@ place** — the same row id, so the slot is never momentarily released.
 
 **A subtle constraint interaction, worth stating because it caused a real bug.**
 A PostgreSQL exclusion predicate must be `IMMUTABLE`, so it cannot call `now()`.
-The predicate is `status IN ('HELD','CONFIRMED')` and nothing more. An *expired*
+The predicate is `status IN ('HELD','CONFIRMED')` and nothing more. An _expired_
 hold therefore still occupies the slot at the constraint level while appearing
 free to every query — the slot advertises itself as bookable and rejects every
 booking.
@@ -359,8 +384,8 @@ Two mitigations, layered:
   correctness: it keeps the constraints' partial indexes small. Availability and
   booking both treat an expired hold as free regardless of when it last ran.
 
-That separation is deliberate — *correctness that depends on a background job
-running on time is correctness that fails when the job is late.*
+That separation is deliberate — _correctness that depends on a background job
+running on time is correctness that fails when the job is late._
 
 ---
 
@@ -379,7 +404,7 @@ graph LR
     style Q fill:#f57c00,color:#fff
 ```
 
-**Why the split.** Slot *shape* depends only on the dealership calendar — no
+**Why the split.** Slot _shape_ depends only on the dealership calendar — no
 database, no clock. That makes the awkward cases (DST transitions, services
 overrunning closing time, foreign timezones) unit-testable in milliseconds
 rather than reachable only through an integrated stack. Occupancy is the only
@@ -397,7 +422,7 @@ zones.
 
 **A wall-clock/elapsed-time distinction that DST tests caught.** Opening hours
 are wall-clock times ("we close at 18:00 local"), so open and close resolve as
-wall-clock instants. Slot *stepping* is elapsed time, because an appointment
+wall-clock instants. Slot _stepping_ is elapsed time, because an appointment
 occupies real duration — a 60-minute service is 60 real minutes even if the
 clock jumps during it. Treating opening hours as elapsed minutes from midnight
 passed every ordinary test and would have opened the dealership an hour late
@@ -407,20 +432,20 @@ every spring.
 
 ## 7. Technology choices
 
-| Choice | Why | Alternatives considered |
-|---|---|---|
-| **PostgreSQL 16** | GiST exclusion constraints are the entire correctness story. This is not a preference — it is the requirement that selected the database | MySQL has no equivalent; the check would move into application code, back to check-then-act. MongoDB cannot express cross-document range exclusion at all |
-| **`btree_gist` + `tstzrange`** | Native range overlap with index support. `&&` on a GiST index is what makes conflict detection both correct and fast | Manual `start < other_end AND end > other_start` in application code — same logic, none of the atomicity |
-| **NestJS 11** | DI makes the layering enforceable rather than aspirational; interceptors and filters give one place for the envelope and one for errors | Express alone: less ceremony, but cross-cutting concerns end up duplicated per route. Fastify: faster, but the bottleneck here is the database, not the HTTP layer |
-| **Prisma 6** | Type-safe reads and migrations, with `$queryRaw` for the SQL that matters | Raw `pg`: full control, no type safety. TypeORM: weaker types. **Trade-off accepted:** the critical statement is hand-written SQL anyway, so the ORM earns its place on the 80% of queries that are ordinary |
-| **Zod + nestjs-zod** | One schema → validator, type, and OpenAPI document | `class-validator`: the Nest default, but the OpenAPI document is then maintained separately and drifts |
-| **Luxon** | Correct IANA timezone and DST arithmetic | `date-fns-tz` is lighter; Luxon's zone-aware `DateTime` made the wall-clock/elapsed distinction explicit rather than incidental |
-| **pino** | Structured JSON, low overhead, correlation IDs | Winston: more features, measurably slower per line |
-| **prom-client** | Prometheus is the de-facto scrape standard | StatsD: push-based, needs extra infrastructure |
-| **Jest + supertest** | Integration tests exercise the real stack against real PostgreSQL | Mocked repositories would prove only that the mocks return what they were told |
+| Choice                         | Why                                                                                                                                      | Alternatives considered                                                                                                                                                                                      |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **PostgreSQL 16**              | GiST exclusion constraints are the entire correctness story. This is not a preference — it is the requirement that selected the database | MySQL has no equivalent; the check would move into application code, back to check-then-act. MongoDB cannot express cross-document range exclusion at all                                                    |
+| **`btree_gist` + `tstzrange`** | Native range overlap with index support. `&&` on a GiST index is what makes conflict detection both correct and fast                     | Manual `start < other_end AND end > other_start` in application code — same logic, none of the atomicity                                                                                                     |
+| **NestJS 11**                  | DI makes the layering enforceable rather than aspirational; interceptors and filters give one place for the envelope and one for errors  | Express alone: less ceremony, but cross-cutting concerns end up duplicated per route. Fastify: faster, but the bottleneck here is the database, not the HTTP layer                                           |
+| **Prisma 6**                   | Type-safe reads and migrations, with `$queryRaw` for the SQL that matters                                                                | Raw `pg`: full control, no type safety. TypeORM: weaker types. **Trade-off accepted:** the critical statement is hand-written SQL anyway, so the ORM earns its place on the 80% of queries that are ordinary |
+| **Zod + nestjs-zod**           | One schema → validator, type, and OpenAPI document                                                                                       | `class-validator`: the Nest default, but the OpenAPI document is then maintained separately and drifts                                                                                                       |
+| **Luxon**                      | Correct IANA timezone and DST arithmetic                                                                                                 | `date-fns-tz` is lighter; Luxon's zone-aware `DateTime` made the wall-clock/elapsed distinction explicit rather than incidental                                                                              |
+| **pino**                       | Structured JSON, low overhead, correlation IDs                                                                                           | Winston: more features, measurably slower per line                                                                                                                                                           |
+| **prom-client**                | Prometheus is the de-facto scrape standard                                                                                               | StatsD: push-based, needs extra infrastructure                                                                                                                                                               |
+| **Jest + supertest**           | Integration tests exercise the real stack against real PostgreSQL                                                                        | Mocked repositories would prove only that the mocks return what they were told                                                                                                                               |
 
 **On testing against a real database:** the behaviour under test here is
-*emergent* — SQL semantics, constraint enforcement, retry under contention. A
+_emergent_ — SQL semantics, constraint enforcement, retry under contention. A
 mocked repository cannot exhibit an exclusion violation, so a mock-based suite
 would pass identically against a completely broken design. Testcontainers was
 the original plan; the Docker daemon was unavailable when the suite was written,
@@ -435,18 +460,18 @@ the repository.
 ## 8. Observability
 
 The generic RED signals come from HTTP instrumentation and say little about
-*this* system. Three metrics are specific to a contention-based design, and they
+_this_ system. Three metrics are specific to a contention-based design, and they
 exist to answer one operational question: **is the dealership genuinely full, or
 is the system fighting itself?**
 
-| Signal | What it tells you | Why it matters here |
-|---|---|---|
-| `booking_conflicts_total` | Writes refused by an exclusion constraint | Rising = the resource pool is too small for demand, or candidate selection has started clustering |
-| `booking_retry_exhausted_total` | Requests that lost every attempt | These are customers who saw a failure. **This is the number that maps to harm** |
-| `booking_attempts_per_request` | Histogram, bucketed at the retry limit | The **leading** indicator — it climbs before anything is user-visible, so it is what to alert on |
-| `booking_attempts_total{outcome}` | confirmed / unavailable / contended / replayed / rejected | Separates "fully booked" from "contended" without reading logs |
-| `holds_active` | Live reservations | Sustained growth means holds are being abandoned rather than completed — a UX signal |
-| `nodejs_eventloop_lag_*` | Process saturation | How connection-pool exhaustion actually presents |
+| Signal                            | What it tells you                                         | Why it matters here                                                                               |
+| --------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `booking_conflicts_total`         | Writes refused by an exclusion constraint                 | Rising = the resource pool is too small for demand, or candidate selection has started clustering |
+| `booking_retry_exhausted_total`   | Requests that lost every attempt                          | These are customers who saw a failure. **This is the number that maps to harm**                   |
+| `booking_attempts_per_request`    | Histogram, bucketed at the retry limit                    | The **leading** indicator — it climbs before anything is user-visible, so it is what to alert on  |
+| `booking_attempts_total{outcome}` | confirmed / unavailable / contended / replayed / rejected | Separates "fully booked" from "contended" without reading logs                                    |
+| `holds_active`                    | Live reservations                                         | Sustained growth means holds are being abandoned rather than completed — a UX signal              |
+| `nodejs_eventloop_lag_*`          | Process saturation                                        | How connection-pool exhaustion actually presents                                                  |
 
 **Logging** — pino, structured JSON, correlation ID per request via
 `AsyncLocalStorage`, propagated to every line and returned as `X-Request-Id`.
@@ -472,8 +497,8 @@ make the outage worse.
 
 - **No authentication.** The brief does not ask for it, and adding a login
   system would spend effort outside the graded requirements. But the one
-  ownership rule the domain *implies* is enforced: an appointment associates a
-  customer and *their* vehicle, so `VehicleNotOwnedError` is checked server-side,
+  ownership rule the domain _implies_ is enforced: an appointment associates a
+  customer and _their_ vehicle, so `VehicleNotOwnedError` is checked server-side,
   and `HoldNotOwnedError` stops one customer confirming another's reservation.
   Both read the customer id from the request body — the one seam a real guard
   would replace, by resolving it from a verified token instead.
@@ -497,15 +522,15 @@ the order the load would demand them.
 outnumber bookings by roughly 100:1 — every customer browses, few book. Scale
 the two paths separately.
 
-| Step | Change | Why, and what it costs |
-|---|---|---|
-| 1 | **Cache availability** in Redis, 15–30s TTL, invalidated on write | Absorbs the dominant read load. The cache is a *hint that filters* — booking always re-validates against PostgreSQL, so a stale cache can waste a request but never overbook |
-| 2 | **Read replicas** for `GET /availability` | Removes read load from the primary. Replication lag is acceptable precisely because availability is already advisory |
-| 3 | **PgBouncer**, transaction mode | Connection multiplexing. **Real constraint:** Prisma requires `?pgbouncer=true`, which disables prepared statements and costs some planning time per query. Worth naming because it is a genuine trade-off, not a free win |
-| 4 | **Range-partition `appointment` by `start_at`**, monthly | Keeps the GiST indexes small and resident. Old partitions detach rather than delete. The overlap probes every booking depends on degrade as those indexes grow |
-| 5 | **Per-customer rate limiting** | Requires authentication first — see §8 |
+| Step | Change                                                            | Why, and what it costs                                                                                                                                                                                                     |
+| ---- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | **Cache availability** in Redis, 15–30s TTL, invalidated on write | Absorbs the dominant read load. The cache is a _hint that filters_ — booking always re-validates against PostgreSQL, so a stale cache can waste a request but never overbook                                               |
+| 2    | **Read replicas** for `GET /availability`                         | Removes read load from the primary. Replication lag is acceptable precisely because availability is already advisory                                                                                                       |
+| 3    | **PgBouncer**, transaction mode                                   | Connection multiplexing. **Real constraint:** Prisma requires `?pgbouncer=true`, which disables prepared statements and costs some planning time per query. Worth naming because it is a genuine trade-off, not a free win |
+| 4    | **Range-partition `appointment` by `start_at`**, monthly          | Keeps the GiST indexes small and resident. Old partitions detach rather than delete. The overlap probes every booking depends on degrade as those indexes grow                                                             |
+| 5    | **Per-customer rate limiting**                                    | Requires authentication first — see §8                                                                                                                                                                                     |
 
-**What does *not* need to change:** the concurrency design. Exclusion
+**What does _not_ need to change:** the concurrency design. Exclusion
 constraints work identically across any number of API instances, because the
 arbiter is the database. Adding capacity does not weaken the guarantee, which is
 the property that made this approach worth choosing over application-level
@@ -525,14 +550,14 @@ unedited record. This section covers **design**.
 
 **Strategy: use the model to generate candidates fast, then attack them.** The
 value was never in the first answer — it was in having something concrete and
-specific enough to be *wrong in an identifiable way*. Three examples where that
+specific enough to be _wrong in an identifiable way_. Three examples where that
 mattered:
 
 **The rejected locking design.** The first proposal was
 `SELECT … FOR UPDATE` on technician and bay rows, with a constraint as backstop.
 It is textbook, it is what most engineers would write, and it would have
 shipped. What caught it was asking a mechanical question rather than a stylistic
-one: *what does this lock actually lock?* It locks the technician row, so a
+one: _what does this lock actually lock?_ It locks the technician row, so a
 09:00 booking blocks an unrelated 15:00 booking. That reframed the constraint
 from backstop to authority and removed pessimistic locking entirely.
 
@@ -556,7 +581,7 @@ inspection, and none would have survived a reading-based review:
   time. Correct 363 days a year; no reviewer would flag the line.
 - The **expired-hold constraint gap** — an exclusion predicate cannot call
   `now()`, so a lapsed hold blocks at the constraint level while appearing free
-  to every query. Surfaced as an *intermittent* test failure, which is normally
+  to every query. Surfaced as an _intermittent_ test failure, which is normally
   dismissed as flakiness.
 - The **vacuous-test check** — the concurrency suite went green on the first
   run, which is exactly when a test deserves the most suspicion. An independent
@@ -574,14 +599,14 @@ backed by something that was run, not something that was asserted.
 
 ## 11. Verification
 
-| Layer | Count | What it proves |
-|---|---|---|
-| **Unit** (no database) | 23 | Slot generation across DST transitions, closed days, closing-time overrun, foreign timezones, input validation, configuration parsing |
-| **Constraint proof** | 12 | The database rejects overlaps — asserted *before* any service code existed, so nothing downstream trusts an unverified guarantee |
-| **Booking rules** | 21 | Booking, refusals with precise codes, holds, hold ownership, idempotency, cancellation, reads |
-| **Availability** | 10 | Occupancy reflects qualification, capability, shift coverage, and existing bookings |
-| **Catalog, health, jobs** | 14 | Reference data, probes, metrics format, hold sweeper, and outbox atomicity — a forced outbox failure must roll the appointment back |
-| **Concurrency** | 5 | The decisive tests — see below |
+| Layer                     | Count | What it proves                                                                                                                        |
+| ------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| **Unit** (no database)    | 23    | Slot generation across DST transitions, closed days, closing-time overrun, foreign timezones, input validation, configuration parsing |
+| **Constraint proof**      | 12    | The database rejects overlaps — asserted _before_ any service code existed, so nothing downstream trusts an unverified guarantee      |
+| **Booking rules**         | 21    | Booking, refusals with precise codes, holds, hold ownership, idempotency, cancellation, reads                                         |
+| **Availability**          | 10    | Occupancy reflects qualification, capability, shift coverage, and existing bookings                                                   |
+| **Catalog, health, jobs** | 14    | Reference data, probes, metrics format, hold sweeper, and outbox atomicity — a forced outbox failure must roll the appointment back   |
+| **Concurrency**           | 5     | The decisive tests — see below                                                                                                        |
 
 **Coverage: 93.0% statements, 94.2% lines, 97.0% functions** (85 tests).
 
