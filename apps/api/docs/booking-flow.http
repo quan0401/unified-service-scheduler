@@ -4,7 +4,7 @@
 # captures the ids the next one needs, so no manual copying is required.
 #
 # Prerequisites:
-#   cd api && pnpm prisma migrate deploy && pnpm db:seed && pnpm start:dev
+#   cd apps/api && pnpm prisma migrate deploy && pnpm db:seed && pnpm start:dev
 
 @host = http://localhost:3000
 @contentType = application/json

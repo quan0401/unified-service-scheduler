@@ -7,7 +7,7 @@ including the refusal paths that matter most.
 ## Prerequisites
 
 ```bash
-cd api
+cd apps/api
 pnpm install
 pnpm prisma migrate deploy
 pnpm db:seed          # prints the ids used below
@@ -215,7 +215,7 @@ simultaneous window, not the everyday path — which is why
 `booking_conflicts_total` usually stays at zero even under this load.
 
 The automated equivalent, at 200 concurrent requests with database-level
-assertions, is `api/test/concurrency/booking-race.e2e-spec.ts`.
+assertions, is `apps/api/test/concurrency/booking-race.e2e-spec.ts`.
 
 ## 9. Observability
 
@@ -235,4 +235,4 @@ itself".
 
 Swagger UI is served at <http://localhost:3000/docs>, generated from the same
 Zod schemas the server validates against — so it cannot drift from the
-implementation. The document is also committed at `api/docs/openapi.json`.
+implementation. The document is also committed at `apps/api/docs/openapi.json`.

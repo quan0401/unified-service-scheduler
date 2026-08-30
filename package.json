@@ -2,7 +2,7 @@
   "name": "unified-service-scheduler",
   "version": "1.0.0",
   "private": true,
-  "description": "Unified Service Scheduler — dealership appointment booking",
+  "description": "Unified Service Scheduler \u2014 dealership appointment booking",
   "packageManager": "pnpm@10.33.0",
   "engines": {
     "node": ">=22"
@@ -14,7 +14,6 @@
     "test:integration": "turbo run test:integration",
     "test:load": "turbo run test:load",
     "test:cov": "turbo run test:cov",
-    "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
     "db:deploy": "pnpm --filter @scheduler/api db:deploy",
