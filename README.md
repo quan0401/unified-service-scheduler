@@ -31,6 +31,7 @@ against real PostgreSQL and asserts a single row survives.
 | API contract               | [`apps/api/docs/openapi.json`](apps/api/docs/openapi.json), Swagger UI at `/docs`                                                                                                                           |
 | Client stub / test harness | [`apps/api/docs/curl-walkthrough.md`](apps/api/docs/curl-walkthrough.md), [`apps/api/docs/booking-flow.http`](apps/api/docs/booking-flow.http)                                                              |
 | AI collaboration narrative | [§ below](#ai-collaboration-narrative) · raw log: [`docs/ai-collaboration-log.md`](docs/ai-collaboration-log.md)                                                                                            |
+| Live concurrency demo      | [`demo/race.sh`](demo/race.sh) fires 50 simultaneous bookings at one slot · [`demo/verify.sql`](demo/verify.sql) is the SQL that proves one row survived                                                       |
 | Running instance           | <https://18.138.188.0/> — a deployment to click. The concurrency _proof_ is the test suite, not the browser demo; see [the caveats](apps/web/README.md#what-the-concurrency-screen-does-and-does-not-prove) |
 
 ---
@@ -286,6 +287,32 @@ flow — availability, hold, confirm, idempotent replay, every refusal path,
 cancel-and-rebook, and a 50-request concurrency demo. Every command in it was
 executed and its output verified.
 
+For the race specifically, [`demo/`](demo) runs it in one command against the
+Docker stack:
+
+```bash
+./demo/race.sh                                    # 1×201, 49×409
+psql "postgresql://scheduler:scheduler@localhost:55432/scheduler" \
+  -c '\i demo/verify.sql'
+```
+
+A shell `for` loop cannot demonstrate this, which is why the script exists.
+Spawning fifty `curl` processes staggers them by milliseconds — wider than the
+window in which requests can actually contend — so they queue behind the winner
+and the exclusion constraint is never consulted.
+[`demo/race.mjs`](demo/race.mjs) dispatches all fifty from one process before the
+event loop yields, the same technique `booking-race.e2e-spec.ts` uses in-process.
+
+[`demo/verify.sql`](demo/verify.sql) then prints four blocks: the one live
+booking; the total rows written for that window — `1`, so the other forty-nine
+wrote nothing; a scan of the **whole table** for two live bookings sharing a bay
+or technician in overlapping time — `0 rows`; and the three `EXCLUDE USING gist`
+constraints that make the third block impossible to violate.
+
+`race.sh` deletes existing rows for its target slot before firing, so repeated
+runs are identical. It assumes the seeded Northgate Auto transmission slot and
+the compose stack's ports — API on 13000, PostgreSQL on 55432.
+
 ---
 
 ## The demo client
@@ -309,8 +336,11 @@ visible.
 Two caveats that the screen states itself rather than hiding: browsers cap
 concurrent connections per origin at roughly six, so requests leave in waves;
 and the per-IP rate limiter produces 429s that are bucketed separately from
-booking conflicts, because collapsing them would overstate the result. The
-authoritative concurrency proof is still
+booking conflicts, because collapsing them would overstate the result.
+
+`demo/race.sh` is the middle rung: real HTTP with no per-origin connection cap,
+against a stack whose throttle ceiling is already raised, so neither caveat
+applies. The authoritative proof is still
 `apps/api/test/concurrency/booking-race.e2e-spec.ts`, at 200 requests with
 database-level assertions.
 
@@ -541,6 +571,7 @@ docker-compose.yml            Full stack: PostgreSQL 16 + the API
 apps/api/Dockerfile           Multi-stage, workspace-aware build
 .data/                        Bind-mounted database files (gitignored)
 docs/ai-collaboration-log.md  Raw decision log
+demo/                         Live concurrency race + psql verification
 turbo.json                    Task graph; DB-backed tasks are uncached
 tsconfig.base.json            One compiler baseline for every package
 

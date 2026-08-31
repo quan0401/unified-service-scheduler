@@ -797,7 +797,8 @@ pnpm test:cov          # combined coverage
 ```
 
 `apps/api/docs/curl-walkthrough.md` reproduces the whole flow by hand, including a
-50-request concurrency demo.
+50-request concurrency demo. `demo/race.sh` and `demo/verify.sql` run that race
+against the Docker stack in one command and verify the surviving row in SQL.
 
 **None of this is trusted to be run by hand.** `.github/workflows/ci.yml` runs
 typecheck, build, the unit suite, and the integration suite on every push,
