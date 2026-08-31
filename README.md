@@ -231,26 +231,37 @@ pnpm test:load         # the 200-way race on its own
 pnpm test:cov          # combined coverage
 ```
 
+A deployed instance is checked separately, because the suites above run with no
+reverse proxy, no TLS, and no container CPU limit in front of them — conditions
+under which a wrong OpenAPI base path, a stripped `Idempotency-Key`, an expired
+certificate, or a connection pool sized from the container's CPU count all pass
+locally and fail in production:
+
+```bash
+python3 infra/live-test.py https://<host>   # standard library only, no setup
+```
+
 Turbo caches `build` and `test`. The database-backed tasks are declared
 `"cache": false` — their result depends on live database state rather than on
 file inputs, so a cached "pass" could report success for a suite that never ran
 against the current schema.
 
-**107 tests. 93.9% statements, 95.0% lines, 97.4% functions.**
+**129 tests. 93.7% statements, 94.6% lines, 96.7% functions.**
 
-| Suite                               | Tests | What it proves                                                        |
-| ----------------------------------- | ----- | --------------------------------------------------------------------- |
-| `slot-generator.spec.ts`            | 16    | DST transitions, closed days, closing-time overrun, foreign timezones |
-| `env.spec.ts`                       | 7     | Malformed configuration falls back instead of yielding `NaN`          |
-| `probe-paths.spec.ts`               | 8     | Health and metrics paths are filtered from logs and traces alike      |
-| `tracer.spec.ts`                    | 6     | Span attributes, the outcome vocabulary, and recorded exceptions      |
-| `tracing.spec.ts`                   | 2     | Tracing stays inert when no OTLP endpoint is configured               |
-| `exclusion-constraints.e2e-spec.ts` | 12    | The database rejects overlaps — written _before_ any service code     |
-| `booking.e2e-spec.ts`               | 21    | Booking, refusals, holds, ownership, idempotency, cancellation        |
-| `availability.e2e-spec.ts`          | 10    | Occupancy reflects skills, capabilities, shifts, bookings             |
-| `catalog-and-jobs.e2e-spec.ts`      | 15    | Reference data, health, metrics, sweeper, and **outbox atomicity**    |
-| `outbox-relay.e2e-spec.ts`          | 5     | Concurrent relays dispatch each event exactly once                    |
-| `booking-race.e2e-spec.ts`          | 5     | **The decisive tests**                                                |
+| Suite                               | Tests | What it proves                                                         |
+| ----------------------------------- | ----- | ---------------------------------------------------------------------- |
+| `slot-generator.spec.ts`            | 16    | DST transitions, closed days, closing-time overrun, foreign timezones  |
+| `env.spec.ts`                       | 7     | Malformed configuration falls back instead of yielding `NaN`           |
+| `postgres-errors.spec.ts`           | 22    | Contention timeouts and pool exhaustion are told apart from lost races |
+| `probe-paths.spec.ts`               | 8     | Health and metrics paths are filtered from logs and traces alike       |
+| `tracer.spec.ts`                    | 6     | Span attributes, the outcome vocabulary, and recorded exceptions       |
+| `tracing.spec.ts`                   | 2     | Tracing stays inert when no OTLP endpoint is configured                |
+| `exclusion-constraints.e2e-spec.ts` | 12    | The database rejects overlaps — written _before_ any service code      |
+| `booking.e2e-spec.ts`               | 21    | Booking, refusals, holds, ownership, idempotency, cancellation         |
+| `availability.e2e-spec.ts`          | 10    | Occupancy reflects skills, capabilities, shifts, bookings              |
+| `catalog-and-jobs.e2e-spec.ts`      | 15    | Reference data, health, metrics, sweeper, and **outbox atomicity**     |
+| `outbox-relay.e2e-spec.ts`          | 5     | Concurrent relays dispatch each event exactly once                     |
+| `booking-race.e2e-spec.ts`          | 5     | **The decisive tests**                                                 |
 
 The decisive one fires **200 simultaneous bookings at a single slot backed by a
 single bay** and asserts exactly one `201`, 199 `409`, and exactly one row in
