@@ -32,11 +32,16 @@ id_rsa*
 purpose.txt
 
 # Personal preparation material, not project deliverables.
-# VIDEO.md is a speaking script for the submission recording.
 # myDocs/ holds working notes and trade-off analyses written while building.
 VIDEO.md
+VIDEO_gpt.md
 myDocs/
 .claude/
+
+# The recording itself. GitHub rejects blobs over 100 MB, and a large file
+# committed once stays in history even after it is deleted.
+*.mov
+*.mp4
 
 # Misc
 *.log

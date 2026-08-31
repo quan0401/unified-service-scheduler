@@ -45,7 +45,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://scheduler:scheduler@postgres:5432/scheduler?schema=public
+      DATABASE_URL: postgresql://scheduler:scheduler@postgres:5432/scheduler?schema=public&connection_limit=50
       PORT: '3000'
       LOG_LEVEL: info
       CORS_ORIGIN: http://localhost:5173
