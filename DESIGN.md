@@ -361,8 +361,10 @@ insert; the second blocks on the exclusion constraint's index entry and raises
 `23P01` when the first commits. That is the design working rather than failing.
 The statement narrows the window to something rare, and the constraint settles
 whatever is left — which is why the constraint is the authority here and the
-statement is an optimisation. §11 measures the split: 200 concurrent bookers
-produced **two** genuine constraint conflicts, not 199.
+statement is an optimisation. §11 measures the split: of 200 concurrent bookers,
+a measured run reached the constraint **twice**, not 199 times — most losers were
+turned away by the availability filter first. The exact count is
+scheduling-dependent and varies between runs; the shape does not.
 
 **`ORDER BY random()` is deliberate.** `ORDER BY least_loaded` is the obvious
 choice and is actively harmful under concurrency: every in-flight request
@@ -778,11 +780,14 @@ sharing an idempotency key produce one appointment.
 Measured in-process: the 200-booker case settles in **~520 ms** across repeated
 runs. Fired instead as 200 shell requests at the containerised API, the outcome
 is the same 1 × `201` and 199 × `409`, with `booking_retry_exhausted_total` at
-zero and `booking_conflicts_total` at **2**. That last number is the interesting
-one: 198 losers never reached the constraint at all, because the winner commits
-fast enough that their availability filter already sees the slot taken. Two did.
-The exclusion constraint is the backstop for the genuinely simultaneous window,
-not the everyday path — but it is a backstop that fires, not decoration.
+zero and `booking_conflicts_total` at **2** in the run recorded here. That last
+number is the interesting one, and it is the one figure on this page that is not
+reproducible: 198 losers never reached the constraint at all, because the winner
+commits fast enough that their availability filter already sees the slot taken.
+Two did. How many land in that genuinely simultaneous window depends on
+scheduling and will differ run to run — what does not vary is the `1 × 201` and
+the single row. The exclusion constraint is the backstop for that window, not
+the everyday path, and it is a backstop that fires rather than decoration.
 
 ```bash
 cd apps/api
