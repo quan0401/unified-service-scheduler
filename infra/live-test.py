@@ -197,6 +197,18 @@ if vehicle_id and slots:
 st, _ = call("/api/health")
 check("TLS chain verifies without -k", st == 200, "urllib verified the cert")
 
+# The Prometheus registry is proxied to nobody. nginx returns 404 for it; the
+# in-cluster scraper reaches api:3000/metrics directly and never comes through
+# here. All three spellings are asserted because Express would route all three
+# to the same handler if the deny rule were ever narrowed to an exact match.
+for path in ("/api/metrics", "/api/metrics/", "/api/METRICS"):
+    st, _ = call(path)
+    check(f"{path} is not public", st == 404, f"HTTP {st}")
+
+# The counterpart: the deny rule must not have swallowed the rest of /api/.
+st, _ = call("/api/dealerships")
+check("/api/dealerships still proxied", st == 200, f"HTTP {st}")
+
 print()
 failed = [n for n, ok, _ in results if not ok]
 print(f"{len(results) - len(failed)}/{len(results)} passed")

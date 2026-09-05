@@ -24,6 +24,15 @@ export type BookingOutcome = 'confirmed' | 'unavailable' | 'contended' | 'replay
 
 @Injectable()
 export class MetricsService {
+  /** Every value of BookingOutcome, so the counter can be seeded with all of them. */
+  private static readonly OUTCOMES: readonly BookingOutcome[] = [
+    'confirmed',
+    'unavailable',
+    'contended',
+    'replayed',
+    'rejected',
+  ];
+
   readonly registry = new Registry();
 
   private readonly bookingAttempts = new Counter({
@@ -67,6 +76,25 @@ export class MetricsService {
   });
 
   constructor() {
+    // Publish every outcome at zero before any request arrives.
+    //
+    // A labelled counter has no child until something increments it, and a
+    // series that first appears mid-window is unmeasurable: `rate()` needs two
+    // samples, and if the whole burst lands before the first scrape of a new
+    // series, every sample in the window is identical and the rate reads zero.
+    // demo/race.sh settles in under 400ms against a 5s scrape, so without this
+    // the outcome panel shows nothing during precisely the event it exists to
+    // show -- while booking_conflicts_total, which is unlabelled and therefore
+    // exported from process start, shows the spike correctly. That asymmetry
+    // was the tell.
+    //
+    // It also makes `sum by (outcome)` complete rather than silently missing
+    // the outcomes that have not happened yet, so "no rejections" and "the
+    // rejection counter does not exist" stop looking the same.
+    for (const outcome of MetricsService.OUTCOMES) {
+      this.bookingAttempts.inc({ outcome }, 0);
+    }
+
     // Process-level metrics: event loop lag and heap growth are how connection
     // pool saturation actually presents under load.
     collectDefaultMetrics({ register: this.registry });

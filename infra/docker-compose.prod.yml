@@ -87,3 +87,120 @@ services:
       # it. Both the first issuance and every renewal go through here.
       - ./webroot:/var/www/certbot:ro
     restart: unless-stopped
+
+  # Metrics. The API has always exported a full Prometheus registry -- GC pauses
+  # by kind, V8 heap and heap spaces, RSS, event loop lag percentiles, plus the
+  # six booking metrics in metrics.service.ts -- and until now nothing recorded
+  # any of it. On a 2 GiB instance running a contention demo, heap growth and
+  # event loop lag are the two numbers that say whether the pool is saturating,
+  # so they are worth keeping after the request that produced them is gone.
+  #
+  # Scrapes api:3000 on the compose network, so nginx's /api/metrics 404 does
+  # not apply here and does not need an exception.
+  #
+  # Config arrives through the top-level `configs:` block at the bottom of this
+  # file rather than as a bind mount. The host receives exactly one file -- this
+  # one, base64'd into user-data on first boot and re-fetched from GitHub by
+  # update.sh on every redeploy -- so a second file on disk would need a new
+  # delivery path through the rollback logic. Inlining costs a duplicated scrape
+  # config and buys leaving that path alone.
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: scheduler-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      # Both bounds, not one. Time alone does not protect a 20 GB root volume if
+      # the series count ever changes; size alone throws away history for no
+      # reason when it does not.
+      - '--storage.tsdb.retention.time=3d'
+      - '--storage.tsdb.retention.size=512MB'
+    configs:
+      - source: prometheus_config
+        target: /etc/prometheus/prometheus.yml
+    volumes:
+      # A named volume, unlike postgres above. Postgres uses a bind mount because
+      # its files are worth being able to look at; this is a TSDB nobody reads by
+      # hand, and a named volume means user-data.sh needs no new mkdir and no
+      # chown for the uid this image runs as.
+      - prometheus-data:/prometheus
+    # Loopback only. Nothing here should be reachable from the internet, and the
+    # security group in deploy.sh stays as it is -- reach it with
+    # `aws ssm start-session --document-name AWS-StartPortForwardingSession`.
+    ports:
+      - '127.0.0.1:9090:9090'
+    # 2 GiB total, already carrying postgres, the API and nginx. The ceiling is
+    # here so that memory pressure kills the graphing tool rather than the
+    # database.
+    mem_limit: 320m
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: scheduler-grafana
+    depends_on:
+      - prometheus
+    environment:
+      # Anonymous, because reaching this at all already requires an SSM session,
+      # which is IAM-gated and equivalent to shell access on the box. A second
+      # password in front of it would guard nothing and would have to be
+      # generated into .env, which means touching user-data.sh.
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_BASIC_ENABLED: 'false'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_NEWS_NEWS_FEED_ENABLED: 'false'
+    configs:
+      - source: grafana_datasource
+        target: /etc/grafana/provisioning/datasources/datasource.yml
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      - '127.0.0.1:3001:3000'
+    mem_limit: 256m
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+# Inline configuration files. Compose writes each `content` block into the
+# container at the `target` the service names, which is how this deployment gets
+# auxiliary config onto a host that only ever receives this single file.
+#
+# Requires Compose >= 2.23.1, which is where `content` landed. The host installs
+# docker-compose-plugin from Docker's own apt repository (see user-data.sh),
+# which is far past that.
+configs:
+  # Mirrors infra/observability/prometheus.yml, which the local stack bind-mounts.
+  # Two copies, deliberately -- see the prometheus service comment above. Change
+  # both together.
+  prometheus_config:
+    content: |
+      global:
+        scrape_interval: 5s
+        evaluation_interval: 15s
+      scrape_configs:
+        - job_name: scheduler-api
+          metrics_path: /metrics
+          static_configs:
+            - targets: ['api:3000']
+              labels:
+                service: scheduler-api
+
+  # The uid is pinned so that infra/observability/grafana/dashboards/scheduler.json,
+  # which references its data source by uid, imports here without being re-pointed.
+  grafana_datasource:
+    content: |
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          uid: scheduler-prometheus
+          type: prometheus
+          access: proxy
+          url: http://prometheus:9090
+          isDefault: true
+          editable: false
+          jsonData:
+            timeInterval: 5s

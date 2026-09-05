@@ -1,0 +1,23 @@
+# Provisioned at startup so the stack comes up already wired -- no click-through
+# to add a data source before the dashboard renders.
+#
+# `isDefault` matters: the checked-in dashboard refers to its data source by the
+# ${DS_PROMETHEUS} input, which resolves to the default when nothing else is
+# selected at import time.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: scheduler-prometheus
+    type: prometheus
+    access: proxy
+    # Container-to-container on the compose network, so this is the service
+    # name and the internal port -- not the 19090 published to the host.
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Matches prometheus.yml. Grafana uses it to pick a sane default step
+      # instead of interpolating across gaps that are not really gaps.
+      timeInterval: 5s

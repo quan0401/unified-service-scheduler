@@ -151,8 +151,9 @@ The API is on **13000** and PostgreSQL on **55432** — non-default on purpose, 
 the stack runs alongside a local PostgreSQL and a local `pnpm start:dev` without
 a port clash. Swagger UI: `http://localhost:13000/docs`.
 
-**State lives in `./.data`** — `postgres/` always, and `jaeger/` when the
-observability profile is running — bind-mounted inside the repository rather
+**State lives in `./.data`** — `postgres/` always, and `jaeger/`,
+`prometheus/` and `grafana/` when the observability profile is running —
+bind-mounted inside the repository rather
 than in Docker-managed named volumes. State is visible and
 disposable — `docker compose down && rm -rf .data` is a complete reset — at the
 cost of bind-mount I/O, which is noticeably slower on macOS and Windows. A
@@ -210,6 +211,63 @@ docker compose --profile observability down
 
 `./.data/jaeger` survives that, exactly as `./.data/postgres` does. `rm -rf .data`
 clears both.
+
+### Seeing the metrics
+
+The same profile brings up Prometheus and Grafana. The API has always exported
+a full registry at `/metrics` — the prom-client process defaults (GC pause by
+kind, V8 heap and per-space usage, RSS, event-loop lag percentiles, handles and
+file descriptors) alongside the six booking metrics defined in
+`metrics.service.ts` — but nothing recorded it. The numbers existed for exactly
+as long as the terminal that curled them.
+
+```bash
+docker compose --profile observability up -d --build
+./demo/race.sh                       # 50 simultaneous bookings of one slot
+```
+
+Grafana is on <http://localhost:13001> and opens on the dashboard; Prometheus
+is on <http://localhost:19090> for raw queries. Both are provisioned from
+`infra/observability/`, so there is no data source to add and no dashboard to
+import — and because the dashboard is a checked-in JSON file, a change to it is
+a reviewable diff rather than a click somebody else cannot see.
+
+The dashboard is two rows on purpose. The booking row answers *is the system
+fighting itself* — outcome mix, conflict rate, attempts per booking. The
+runtime row answers *is that costing the process anything yet* — GC time, heap,
+event-loop lag. Reading them apart is what makes the pairing worth having:
+conflicts rising while the runtime row stays flat is the exclusion constraint
+doing its job, and conflicts rising **with** event-loop lag is pool saturation.
+
+Scrape interval is 5s rather than the usual 15s. `race.sh` finishes in about a
+second; at 15s the spike it produces would land between two samples and simply
+not exist. GC series only appear once a collection has happened, so an empty
+GC panel on a freshly started stack is expected rather than a wiring fault.
+
+One consequence worth naming: a labelled counter has no series until something
+increments it, and a series that first appears mid-window cannot be rated over
+that window. `booking_attempts_total` is therefore seeded with all five
+outcomes at zero in the `MetricsService` constructor. Without that the outcome
+panel reads zero during the 400ms burst it exists to display, while the
+unlabelled `booking_conflicts_total` shows the spike correctly — an asymmetry
+that looks like a dashboard bug and is not one.
+
+In production both run too, bound to loopback and reachable only through a
+Session Manager port forward — no published ports, no security group change:
+
+```bash
+aws ssm start-session --target <instance-id> \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["3001"],"localPortNumber":["3001"]}'
+```
+
+There the config arrives inline through the compose file's `configs:` block,
+because the instance only ever receives that one file — see
+`infra/docker-compose.prod.yml`. The data source is provisioned; import
+`infra/observability/grafana/dashboards/scheduler.json` once by hand, and the
+named volume keeps it. Retention is capped at three days and 512 MB, and both
+containers carry a `mem_limit`, so on a 2 GiB box memory pressure takes out a
+graphing tool rather than the database.
 
 ---
 
@@ -368,7 +426,7 @@ strategy.
 | `GET`    | `/appointments?customerId=` | List                                                            |
 | `DELETE` | `/appointments/:id`         | Cancel; frees the slot, keeps the record                        |
 | `GET`    | `/health`, `/health/ready`  | Liveness, readiness                                             |
-| `GET`    | `/metrics`                  | Prometheus                                                      |
+| `GET`    | `/metrics`                  | Prometheus. **Internal** — nginx 404s it at the public edge      |
 
 Every response shares one envelope:
 

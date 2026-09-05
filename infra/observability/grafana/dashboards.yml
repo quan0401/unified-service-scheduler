@@ -1,0 +1,23 @@
+# Loads every dashboard JSON under the mounted directory, on an interval, so
+# editing the checked-in file and refreshing the browser is the whole loop.
+#
+# allowUiUpdates is false deliberately: a dashboard edited in the browser and
+# not written back to git is a dashboard that disappears on the next
+# `docker compose down`. Export the JSON and commit it instead.
+
+apiVersion: 1
+
+providers:
+  - name: scheduler
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 10
+    options:
+      # Deliberately not under /var/lib/grafana: that directory is Grafana's
+      # own writable data volume, and nesting a read-only mount inside it
+      # makes mount ordering load-bearing for no benefit.
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false
