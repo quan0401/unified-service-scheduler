@@ -123,7 +123,9 @@ graph TB
 
     subgraph Obs["Observability"]
         LOG["pino<br/>structured JSON"]
-        MET["Prometheus<br/>/metrics"]
+        MET["/metrics<br/>prom-client registry"]
+        PROM["Prometheus<br/>scrapes every 5s"]
+        GRAF["Grafana<br/>runtime + booking"]
         TR["OpenTelemetry<br/>traces"]
     end
 
@@ -140,6 +142,8 @@ graph TB
     BK --> FILT
 
     API -.-> LOG & MET & TR
+    PROM --> MET
+    GRAF --> PROM
 
     style EXC fill:#d32f2f,color:#fff,stroke-width:3px
     style REPO fill:#f57c00,color:#fff
@@ -553,6 +557,31 @@ is the system fighting itself?**
 | `booking_attempts_total{outcome}` | confirmed / unavailable / contended / replayed / rejected | Separates "fully booked" from "contended" without reading logs                                    |
 | `holds_active`                    | Live reservations                                         | Sustained growth means holds are being abandoned rather than completed — a UX signal              |
 | `nodejs_eventloop_lag_*`          | Process saturation                                        | How connection-pool exhaustion actually presents                                                  |
+
+The process metrics sit beside them rather than in a separate tool.
+`collectDefaultMetrics()` supplies GC pause by kind, V8 heap and per-space
+usage, RSS, event-loop lag percentiles, handles and file descriptors, which is
+what makes the question above answerable in both directions: conflicts rising
+while those stay flat is the exclusion constraint doing its job, and conflicts
+rising *with* event-loop lag is the connection pool saturating.
+
+A registry nothing scrapes is a registry that only exists while a terminal is
+looking at it, so both compose files run Prometheus and Grafana — under the
+`observability` profile locally, and unconditionally in production, where
+`prom/prometheus` keeps three days bounded to 512 MB against a 20 GB volume.
+The dashboard is a checked-in JSON file, so changing it is a reviewable diff.
+The scrape interval is 5s rather than 15s because `demo/race.sh` finishes in
+about a second and a 15s sample would miss the spike entirely.
+
+`/metrics` is **not** public. nginx returns 404 for `/api/metrics` at the edge —
+the registry names the Node version, the process memory profile, request volume
+and error rates, and nothing legitimate arrives that way; the scraper is on the
+compose network and talks to `api:3000` directly. In production Prometheus and
+Grafana bind to loopback only and are reached over a Session Manager port
+forward, so the security group is unchanged and neither is exposed.
+`infra/live-test.py` asserts the 404 against the running site, in all three
+spellings Express would otherwise accept, so a later nginx edit cannot quietly
+undo it.
 
 **Logging** — pino, structured JSON, correlation ID per request via
 `AsyncLocalStorage`, propagated to every line and returned as `X-Request-Id`.

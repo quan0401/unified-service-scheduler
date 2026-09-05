@@ -231,6 +231,12 @@ curl -s "$API/metrics" | grep -E '^booking_|^holds_active'
 numbers that distinguish "genuinely fully booked" from "the system is fighting
 itself".
 
+`$API` above is the API's own port. `/metrics` is not reachable through the
+public edge — nginx returns 404 for `/api/metrics` — so against the deployed
+site this last command needs a scraper on the compose network, or Grafana over
+a Session Manager port forward. `/health` and `/health/ready` are public and
+work either way.
+
 ## Interactive API reference
 
 Swagger UI is served at <http://localhost:3000/docs>, generated from the same
