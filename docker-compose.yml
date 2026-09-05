@@ -116,3 +116,72 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+
+  # Metrics backend, off by default, same profile as jaeger:
+  #
+  #   docker compose --profile observability up -d --build
+  #
+  # Then http://localhost:19090 for Prometheus and http://localhost:13001 for
+  # Grafana, which comes up with the data source wired and the dashboard loaded.
+  #
+  # Scrapes api:3000/metrics on the compose network. The API already exports the
+  # full prom-client default registry -- GC pauses by kind, V8 heap and heap
+  # spaces, RSS, event loop lag percentiles, handles and file descriptors -- plus
+  # the six booking metrics defined in metrics.service.ts. None of it was being
+  # recorded before this; /metrics was reachable only by curl, so the numbers
+  # existed exactly as long as the terminal that fetched them.
+  #
+  # No `depends_on` on api, for the reason the jaeger block above gives: a
+  # profiled service cannot depend on an unprofiled one, and it does not need to
+  # -- Prometheus retries a refused scrape and reports the target as down until
+  # it succeeds.
+  #
+  # Tearing down needs the profile: `docker compose --profile observability down`.
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: scheduler-prometheus
+    profiles: ['observability']
+    # Runs as nobody. A bind-mounted directory Docker creates is owned by root,
+    # which that user cannot write to on Linux -- the same problem jaeger has.
+    user: '${PROMETHEUS_UID:-65534}:${PROMETHEUS_GID:-65534}'
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      # A week is enough to still have last Tuesday's demo, and one target at
+      # 5s is a few hundred series -- megabytes, not gigabytes.
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./.data/prometheus:/prometheus
+    ports:
+      - '19090:9090'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: scheduler-grafana
+    profiles: ['observability']
+    depends_on:
+      - prometheus
+    # Grafana's image runs as uid 472; same bind-mount ownership problem.
+    user: '${GRAFANA_UID:-472}:${GRAFANA_GID:-472}'
+    environment:
+      # Local only, and a login prompt in front of a dashboard nobody can reach
+      # from outside this machine buys nothing but friction.
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_BASIC_ENABLED: 'false'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_NEWS_NEWS_FEED_ENABLED: 'false'
+      # Land on the dashboard rather than an empty home page.
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/scheduler.json
+    volumes:
+      - ./infra/observability/grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
+      - ./infra/observability/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./infra/observability/grafana/dashboards:/etc/grafana/dashboards:ro
+      - ./.data/grafana:/var/lib/grafana
+    ports:
+      - '13001:3000'
+    restart: unless-stopped

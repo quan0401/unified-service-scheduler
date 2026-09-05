@@ -1,0 +1,25 @@
+# Scrape configuration for the local stack.
+#
+# One target. The API is the only thing here that exports metrics; Postgres and
+# nginx would each need an exporter sidecar, and neither is where this system's
+# interesting failure mode shows up.
+#
+# NOTE: infra/docker-compose.prod.yml carries a copy of this scrape_configs
+# block inline, under its top-level `configs:` key. The production host receives
+# exactly one file -- the compose file -- so there is no path for this one to
+# reach it. Change both together.
+
+global:
+  # Five seconds, not the usual fifteen. demo/race.sh finishes in about a
+  # second; at 15s the conflict spike it produces would land between two
+  # samples and simply not exist.
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: scheduler-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['api:3000']
+        labels:
+          service: scheduler-api
