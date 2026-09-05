@@ -159,6 +159,20 @@ if [ "$INSTANCE_ID" = "None" ] || [ -z "$INSTANCE_ID" ]; then
       -e "s|__COMPOSE_B64__|${COMPOSE_B64}|g" \
       "$(dirname "$0")/user-data.sh" > "$USER_DATA"
 
+  # EC2 caps user-data at 16384 bytes, measured before the API's own base64
+  # encoding. The rendered script is past that on its own -- the bootstrap is
+  # ~12 KB and the base64 compose file it carries adds ~5.5 KB -- so
+  # run-instances rejects it outright with:
+  #
+  #   InvalidParameterValue: User data is limited to 16384 bytes
+  #
+  # cloud-init sniffs the payload and transparently gunzips it, and the limit
+  # applies to what is sent, so compressing here is the whole fix. Shell text
+  # compresses about 4:1, which leaves plenty of headroom for the compose file
+  # to keep growing. `fileb://` rather than `file://` because the argument is
+  # now binary and must not be read as text.
+  gzip -9 -c "$USER_DATA" > "${USER_DATA}.gz"
+
   INSTANCE_ID=$(aws ec2 run-instances \
     --image-id "resolve:ssm:${AMI_SSM_PARAM}" \
     --instance-type "$INSTANCE_TYPE" \
@@ -166,10 +180,10 @@ if [ "$INSTANCE_ID" = "None" ] || [ -z "$INSTANCE_ID" ]; then
     --iam-instance-profile "Name=${EC2_PROFILE_NAME}" \
     --metadata-options "HttpTokens=required,HttpEndpoint=enabled" \
     --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=${ROOT_VOLUME_GB},VolumeType=gp3,DeleteOnTermination=true,Encrypted=true}" \
-    --user-data "file://${USER_DATA}" \
+    --user-data "fileb://${USER_DATA}.gz" \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${INSTANCE_NAME}}]" \
     --query 'Instances[0].InstanceId' --output text)
-  rm -f "$USER_DATA"
+  rm -f "$USER_DATA" "${USER_DATA}.gz"
 fi
 echo "    ${INSTANCE_ID}"
 
