@@ -12,7 +12,6 @@ exec > >(tee -a /var/log/scheduler-bootstrap.log) 2>&1
 APP_DIR=/opt/scheduler
 REGION="__AWS_REGION__"
 REGISTRY="__ECR_REGISTRY__"
-PUBLIC_IP="__PUBLIC_IP__"
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -62,7 +61,7 @@ if [ ! -f "$APP_DIR/certs/fullchain.pem" ]; then
   openssl req -x509 -newkey rsa:2048 -nodes -days 7 \
     -keyout "$APP_DIR/certs/privkey.pem" \
     -out "$APP_DIR/certs/fullchain.pem" \
-    -subj "/CN=${PUBLIC_IP}" -addext "subjectAltName=IP:${PUBLIC_IP}"
+    -subj "/CN=__BOOTSTRAP_CN__" -addext "subjectAltName=__BOOTSTRAP_SAN__"
   chmod 644 "$APP_DIR/certs/fullchain.pem"
   chmod 600 "$APP_DIR/certs/privkey.pem"
 fi
@@ -226,15 +225,22 @@ fi
 
 # --- TLS ----------------------------------------------------------------------
 #
-# A Let's Encrypt certificate for the Elastic IP itself, so the demo is HTTPS
-# without owning a domain. Two constraints come with that:
+# A Let's Encrypt certificate, for the domains named in config.sh or -- when
+# none are -- for the Elastic IP itself. deploy.sh decides which and passes the
+# identifiers in through a substituted token; everything else here is the same
+# either way.
 #
-#   * IP address certificates are only issued under the "shortlived" profile
-#     (160 hours). Renewal is not housekeeping here -- miss it for a week and
-#     the site breaks. The snap ships a systemd timer that runs twice daily.
-#   * The nginx and apache certbot plugins do not support IP identifiers. Only
-#     manual, standalone, and webroot do, and standalone would need port 80 that
-#     nginx is already holding. Hence webroot, served out of the shared volume.
+#   * The webroot plugin, not nginx or apache: those two do not support IP
+#     identifiers at all, and standalone would need port 80 that nginx is
+#     already holding. Webroot serves the challenge out of the shared volume,
+#     which works for both identifier types.
+#   * The snap ships a systemd timer that runs `certbot renew` twice daily.
+#     That walks every lineage in /etc/letsencrypt/renewal independently and
+#     runs each one's saved deploy hook, so nothing below needs re-running.
+#   * On the IP path, renewal is load-bearing rather than housekeeping: IP
+#     identifiers force the 160-hour "shortlived" profile, and certbot renews
+#     at half of a lifetime that short -- roughly every 3.3 days. A domain
+#     certificate gets the default 90-day profile.
 snap install --classic certbot
 ln -sf /snap/bin/certbot /usr/bin/certbot
 
@@ -249,7 +255,7 @@ echo "certbot ${CERTBOT_VER}"
 cat > "$APP_DIR/deploy-cert.sh" <<'HOOK'
 #!/bin/bash
 set -euo pipefail
-LIVE=$(find /etc/letsencrypt/live -maxdepth 1 -mindepth 1 -type d | head -1)
+LIVE="${RENEWED_LINEAGE:-$(find /etc/letsencrypt/live -maxdepth 1 -mindepth 1 -type d | head -1)}"
 cp -L "$LIVE/fullchain.pem" /opt/scheduler/certs/fullchain.pem
 cp -L "$LIVE/privkey.pem"   /opt/scheduler/certs/privkey.pem
 chmod 644 /opt/scheduler/certs/fullchain.pem
@@ -258,13 +264,16 @@ docker exec scheduler-web nginx -s reload
 HOOK
 chmod +x "$APP_DIR/deploy-cert.sh"
 
-# No email: with six-day certs and an automated timer, expiry notices are noise,
+# No email: renewal is automated by the timer, so expiry notices are noise,
 # and this script lives in a public repository.
+# The identifier token below is deliberately unquoted: it is substituted as
+# several words (--cert-name, --expand, and one -d per name) and must
+# word-split.
+# shellcheck disable=SC2086
 certbot certonly \
   --non-interactive --agree-tos --register-unsafely-without-email \
-  --preferred-profile shortlived \
   --webroot --webroot-path "$APP_DIR/webroot" \
-  --ip-address "$PUBLIC_IP" \
+  __CERTBOT_ID_ARGS__ \
   --deploy-hook "$APP_DIR/deploy-cert.sh" \
   || echo "WARNING: certificate issuance failed; the self-signed placeholder is still in place"
 

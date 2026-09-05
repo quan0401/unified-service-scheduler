@@ -37,10 +37,10 @@ if not BASE:
 BASE = BASE.rstrip("/")
 
 # Deliberately a verifying context. Passing -k, or setting CERT_NONE here, would
-# make an expired or mis-issued certificate invisible to the suite -- and the
-# certificate is issued under Let's Encrypt's six-day "shortlived" profile for
-# an IP address, so renewal failure is a realistic way for this deployment to
-# break.
+# make an expired or mis-issued certificate invisible to the suite -- and
+# renewal failure is a realistic way for this deployment to break, especially on
+# the Elastic-IP path where Let's Encrypt forces the six-day "shortlived"
+# profile.
 CTX = ssl.create_default_context()
 
 # A random future weekday per run, not a fixed offset. A deterministic date made

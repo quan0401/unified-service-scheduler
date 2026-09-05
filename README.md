@@ -32,7 +32,7 @@ against real PostgreSQL and asserts a single row survives.
 | Client stub / test harness | [`apps/api/docs/curl-walkthrough.md`](apps/api/docs/curl-walkthrough.md), [`apps/api/docs/booking-flow.http`](apps/api/docs/booking-flow.http)                                                              |
 | AI collaboration narrative | [§ below](#ai-collaboration-narrative) · raw log: [`docs/ai-collaboration-log.md`](docs/ai-collaboration-log.md)                                                                                            |
 | Live concurrency demo      | [`demo/race.sh`](demo/race.sh) fires 50 simultaneous bookings at one slot · [`demo/verify.sql`](demo/verify.sql) is the SQL that proves one row survived                                                       |
-| Running instance           | <https://18.138.188.0/> — a deployment to click. The concurrency _proof_ is the test suite, not the browser demo; see [the caveats](apps/web/README.md#what-the-concurrency-screen-does-and-does-not-prove) |
+| Running instance           | <https://bachbosua.site/> — a deployment to click. The concurrency _proof_ is the test suite, not the browser demo; see [the caveats](apps/web/README.md#what-the-concurrency-screen-does-and-does-not-prove) |
 
 ---
 
@@ -239,7 +239,7 @@ certificate, or a connection pool sized from the container's CPU count all pass
 locally and fail in production:
 
 ```bash
-python3 infra/live-test.py https://<host>   # standard library only, no setup
+python3 infra/live-test.py https://bachbosua.site   # standard library only, no setup
 ```
 
 Turbo caches `build` and `test`. The database-backed tasks are declared
@@ -600,6 +600,64 @@ apps/api/
     concurrency/     the decisive race tests
   docs/              openapi.json, curl-walkthrough.md, booking-flow.http
 ```
+
+## Deployment
+
+One EC2 instance in the default VPC, three containers behind a single nginx that
+terminates TLS. No load balancer, no CDN, no managed database, and no SSH port —
+shell access is [SSM Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html),
+so the security group opens only 80 and 443. CI builds and pushes images; the host
+only ever pulls.
+
+| File                             | Role                                                                   |
+| -------------------------------- | ---------------------------------------------------------------------- |
+| `infra/config.sh`                | Every knob: region, instance type, repositories, and `DOMAINS`          |
+| `infra/deploy.sh`                | Provision or re-provision. Idempotent — reuses whatever already exists  |
+| `infra/user-data.sh`             | First-boot script. Installs Docker, writes `/opt/scheduler/update.sh`   |
+| `infra/nginx.conf`               | The public origin: ACME challenge, TLS, SPA, and the `/api` proxy       |
+| `infra/docker-compose.prod.yml`  | What runs on the host — only `web` publishes ports                      |
+| `infra/live-test.py`             | Verifies a deployed instance end to end (standard library only)         |
+| `infra/bootstrap-oidc.sh`        | One-time: the IAM role CI assumes, with no long-lived keys              |
+| `infra/teardown.sh`              | Removes everything this created                                          |
+
+```bash
+./infra/bootstrap-oidc.sh          # once per account
+./infra/deploy.sh                  # provision; deploys images tagged with HEAD
+python3 infra/live-test.py https://bachbosua.site
+```
+
+**Domains.** `DOMAINS` in `infra/config.sh` lists every name the certificate must
+cover, **primary first** — and ordering that array is the only place the primary
+domain is chosen. `deploy.sh` derives `APP_URL`, `CORS_ORIGIN`, certbot's
+`--cert-name`, and the self-signed bootstrap subject from `DOMAINS[0]`. Every name
+must already resolve to the Elastic IP before `deploy.sh` runs, because
+[http-01 validation](https://letsencrypt.org/docs/challenge-types/) fetches
+`http://<name>/.well-known/acme-challenge/<token>` on port 80 for each one. One name
+that does not point at the host fails the **whole** issuance, not just its own entry:
+[RFC 8555 §7.1.6](https://www.rfc-editor.org/rfc/rfc8555#section-7.1.6) moves an order
+to `ready` only "once all of the authorizations listed in the order object are in the
+'valid' state," and to `invalid` if "one of its authorizations enters a final state
+other than 'valid.'" Leave `DOMAINS`
+empty to fall back to a Let's Encrypt certificate for the Elastic IP itself, which
+needs no DNS at all but is only issued under the six-day `shortlived` profile.
+
+**Redeploying.** CI publishes images; it does not deploy. A merge to `main` produces
+images tagged with the commit SHA, and the rollout is one command on the host:
+
+```bash
+aws ssm start-session --target "$INSTANCE_ID"
+sudo /opt/scheduler/update.sh          # or: update.sh <commit-sha>
+```
+
+`update.sh` takes both the images and `infra/docker-compose.prod.yml` from the same
+commit, so configuration and code cannot drift apart; it refuses to start unless
+both exist, and rolls back if the new build does not report ready.
+
+Two things that path deliberately does **not** ship: `infra/config.sh` and
+`infra/deploy.sh` are read on your laptop and never sent, and `infra/user-data.sh`
+is replayed only on a fresh instance's first boot. Changes to those take effect on
+the next `deploy.sh`, not the next `update.sh`. Full walkthrough in
+[`myDocs/infrastructure-and-network-topology.md`](myDocs/infrastructure-and-network-topology.md).
 
 ## Configuration
 

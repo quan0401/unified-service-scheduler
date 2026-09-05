@@ -7,14 +7,16 @@
 #   IMAGE_TAG=<sha> ./infra/deploy.sh # deploy a specific build
 #
 # The address is allocated before the instance because everything else depends
-# on knowing it: the certificate is issued *for* that IP, and the API's
-# CORS_ORIGIN has to name the resulting https:// URL.
+# on knowing it: DNS for every name in DOMAINS has to already point at it for
+# http-01 validation to succeed, and with DOMAINS empty the certificate is
+# issued *for* that IP directly.
 #
 # CloudFront was the original design and would have supplied TLS on a
 # *.cloudfront.net name. This account cannot create distributions -- AWS
 # returns "Your account must be verified before you can add new CloudFront
 # resources", which needs a support case. The instance terminates TLS itself
-# instead, using a Let's Encrypt certificate for the Elastic IP. See
+# instead, with a Let's Encrypt certificate for the names in DOMAINS -- or for
+# the Elastic IP when that array is empty. See
 # myDocs/aws-deployment-shape-decision.md.
 
 source "$(dirname "$0")/config.sh"
@@ -62,7 +64,28 @@ EIP_ADDR=$(aws ec2 describe-addresses --allocation-ids "$EIP_ALLOC" --query 'Add
 ORIGIN_DNS="ec2-${EIP_ADDR//./-}.${AWS_DEFAULT_REGION}.compute.amazonaws.com"
 echo "    ${EIP_ADDR}  ->  ${ORIGIN_DNS}"
 
-APP_URL="https://${EIP_ADDR}"
+# What the certificate is issued *for*, and therefore what the app is reached
+# at. Two mutually exclusive shapes, decided by whether config.sh names any
+# domains. Both are assembled here rather than in user-data.sh because
+# user-data has no access to config.sh -- it receives literals through the sed
+# substitution below.
+#
+# --cert-name pins the lineage directory name so nothing downstream has to
+# guess which lineage is current, and --expand makes a re-run that adds a name
+# expand the existing certificate instead of stopping at a prompt it cannot
+# show under --non-interactive.
+PRIMARY_DOMAIN="${DOMAINS[0]:-}"
+if [ -n "$PRIMARY_DOMAIN" ]; then
+  APP_URL="https://${PRIMARY_DOMAIN}"
+  CERTBOT_ID_ARGS="--cert-name ${PRIMARY_DOMAIN} --expand $(printf -- '-d %s ' "${DOMAINS[@]}")"
+  BOOTSTRAP_CN="$PRIMARY_DOMAIN"
+  BOOTSTRAP_SAN="DNS:${PRIMARY_DOMAIN}"
+else
+  APP_URL="https://${EIP_ADDR}"
+  CERTBOT_ID_ARGS="--cert-name ${EIP_ADDR} --preferred-profile shortlived --ip-address ${EIP_ADDR}"
+  BOOTSTRAP_CN="$EIP_ADDR"
+  BOOTSTRAP_SAN="IP:${EIP_ADDR}"
+fi
 echo "    app URL ${APP_URL}"
 
 # --- Security group -----------------------------------------------------------
@@ -130,7 +153,9 @@ if [ "$INSTANCE_ID" = "None" ] || [ -z "$INSTANCE_ID" ]; then
       -e "s|__API_IMAGE__|${API_IMAGE}|g" \
       -e "s|__WEB_IMAGE__|${WEB_IMAGE}|g" \
       -e "s|__CORS_ORIGIN__|${APP_URL}|g" \
-      -e "s|__PUBLIC_IP__|${EIP_ADDR}|g" \
+      -e "s|__CERTBOT_ID_ARGS__|${CERTBOT_ID_ARGS}|g" \
+      -e "s|__BOOTSTRAP_CN__|${BOOTSTRAP_CN}|g" \
+      -e "s|__BOOTSTRAP_SAN__|${BOOTSTRAP_SAN}|g" \
       -e "s|__COMPOSE_B64__|${COMPOSE_B64}|g" \
       "$(dirname "$0")/user-data.sh" > "$USER_DATA"
 

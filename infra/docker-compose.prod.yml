@@ -8,9 +8,10 @@
 #     Apple silicon and Graviton are both arm64, so no emulation is involved.
 #   * Only nginx publishes ports. The API and the database are reachable on the
 #     compose network and nowhere else.
-#   * nginx terminates TLS with a Let's Encrypt IP address certificate. Those
-#     are issued only under the six-day "shortlived" profile, so the host runs
-#     certbot on a timer and its deploy hook reloads this container.
+#   * nginx terminates TLS with a Let's Encrypt certificate covering the names
+#     in config.sh's DOMAINS -- or the Elastic IP itself when that is empty, in
+#     which case the six-day "shortlived" profile is forced. Either way the host
+#     runs certbot on a timer and its deploy hook reloads this container.
 #   * The database password is generated per deploy rather than being the
 #     literal `scheduler`.
 
@@ -83,6 +84,6 @@ services:
       # thing that can corrupt them.
       - ./certs:/etc/nginx/certs:ro
       # The http-01 challenge webroot. certbot writes the token, nginx serves
-      # it. Both the first issuance and every six-day renewal go through here.
+      # it. Both the first issuance and every renewal go through here.
       - ./webroot:/var/www/certbot:ro
     restart: unless-stopped

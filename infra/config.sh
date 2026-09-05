@@ -35,10 +35,28 @@ ROOT_VOLUME_GB=20
 # Resolved at launch by EC2 itself, so the AMI is never pinned in git.
 AMI_SSM_PARAM="/aws/service/canonical/ubuntu/server/24.04/stable/current/${INSTANCE_ARCH}/hvm/ebs-gp3/ami-id"
 
-# TLS. The instance terminates it with a Let's Encrypt certificate issued for
-# the Elastic IP, which is why no domain is needed. IP certificates are only
-# issued under the six-day "shortlived" profile, so certbot's timer on the host
-# is what keeps the site working.
+# TLS. The instance terminates it with a Let's Encrypt certificate.
+#
+# DOMAINS lists every name that certificate must cover, primary first. The
+# primary also becomes APP_URL and CORS_ORIGIN. All of them must already
+# resolve to the Elastic IP before deploy.sh runs: http-01 validation fetches
+# http://<name>/.well-known/acme-challenge/ for each, and a single name that
+# does not point here fails the whole issuance, not just its own entry.
+#
+# One certificate covering every name, not one per name. nginx has a single
+# ssl_certificate path, so only one certificate is ever served no matter how
+# many certbot lineages exist -- issuing a second one produces a lineage that
+# renews forever and reaches no client. Serving a certificate per name would
+# mean per-name server blocks and a lineage-aware deploy hook; see
+# myDocs/domain-certificate-migration.md before going that way.
+#
+# Leave DOMAINS empty to fall back to a certificate for the Elastic IP itself.
+# That path needs no DNS at all, which is what it was for, but IP identifiers
+# are only accepted under the "shortlived" profile (160 hours) and certbot
+# renews at *half* of a lifetime that short rather than the usual third --
+# roughly every 3.3 days. A domain certificate uses the default 90-day
+# profile, so this is the constraint being escaped, not a preference.
+DOMAINS=(bachbosua.site www.bachbosua.site tramlai.work www.tramlai.work)
 #
 # CloudFront would have supplied this instead, on a *.cloudfront.net name, and
 # would additionally have kept the origin private behind prefix list
